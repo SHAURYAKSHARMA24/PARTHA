@@ -12,13 +12,13 @@
  */
 
 export const SAMPLE_REPO = {
-  name: 'acme/checkout-service',
+  name: 'acme/orders-service',
   revision: 'a3f9c21',
   languages: 'Python, TypeScript',
 };
 
 export const SIMULATION_STEPS = [
-  'Cloning acme/checkout-service at a3f9c21',
+  'Cloning acme/orders-service at a3f9c21',
   'Extracting structural facts (Python, TypeScript)',
   'Resolving module and dependency relationships',
   'Sealing the ri.v1 snapshot',

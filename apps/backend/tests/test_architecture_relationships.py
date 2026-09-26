@@ -178,14 +178,16 @@ def test_architecture_edges_come_from_resolved_snapshot_evidence(auth_client):
     nodes = {node["id"]: node for node in architecture["nodes"]}
 
     # Both modules have the same persisted role (entrypoint); neither is collapsed.
-    assert "entrypoint" in nodes["module:alpha"]["tags"]
-    assert "entrypoint" in nodes["module:beta"]["tags"]
+    assert "entrypoint" in nodes["module:src/alpha/index.ts"]["tags"]
+    assert "entrypoint" in nodes["module:src/beta/index.ts"]["tags"]
     assert architecture["relationshipSnapshotId"] == snapshot_id
 
     import_edges = [
         edge
         for edge in architecture["edges"]
-        if edge["source"] == "module:alpha" and edge["target"] == "module:beta" and edge["predicate"] == "imports"
+        if edge["source"] == "module:src/alpha/index.ts"
+        and edge["target"] == "module:src/beta/index.ts"
+        and edge["predicate"] == "imports"
     ]
     assert len(import_edges) == 1
     edge = import_edges[0]
@@ -199,19 +201,23 @@ def test_architecture_edges_come_from_resolved_snapshot_evidence(auth_client):
             "endLine": 1,
         }
     ]
-    assert "module:beta" in nodes["module:alpha"]["dependencies"]
-    assert "module:alpha" in nodes["module:beta"]["dependents"]
-    assert nodes["module:alpha"]["relationshipState"] == "connected"
-    assert nodes["module:beta"]["relationshipState"] == "connected"
+    assert "module:src/beta/index.ts" in nodes["module:src/alpha/index.ts"]["dependencies"]
+    assert "module:src/alpha/index.ts" in nodes["module:src/beta/index.ts"]["dependents"]
+    assert nodes["module:src/alpha/index.ts"]["relationshipState"] == "connected"
+    assert nodes["module:src/beta/index.ts"]["relationshipState"] == "connected"
     assert any(
-        item["source"] == "module:alpha" and item["target"] == "module:beta" and item["predicate"] == "calls"
+        item["source"] == "module:src/alpha/index.ts"
+        and item["target"] == "module:src/beta/index.ts"
+        and item["predicate"] == "calls"
         for item in architecture["edges"]
     )
     assert not any(item["source"] == item["target"] for item in architecture["edges"])
     assert not any(item["code"] == "ARCH-REL-ENDPOINT-UNMAPPED" for item in architecture["diagnostics"])
 
     dependency_edges = [
-        item for item in architecture["edges"] if item["source"] == "module:alpha" and item["target"] == "dep:npm:react"
+        item
+        for item in architecture["edges"]
+        if item["source"] == "module:src/alpha/index.ts" and item["target"] == "dep:npm:react"
     ]
     assert {item["predicate"] for item in dependency_edges} == {"imports", "depends_on"}
     assert not any(item["target"] == "dep:npm:lodash" for item in architecture["edges"])
@@ -223,7 +229,7 @@ def test_architecture_edges_come_from_resolved_snapshot_evidence(auth_client):
         if item["code"] == "ARCH-REL-REPO-SCOPED" and item["path"] == "package.json" and item["severity"] == "info"
     )
     assert root_scope_diagnostic["nodeIds"] is None
-    assert nodes["module:lonely"]["relationshipState"] == "no-observed-relationships"
+    assert nodes["module:src/lonely/index.ts"]["relationshipState"] == "no-observed-relationships"
     assert nodes["module:documentation"]["relationshipState"] == "not-extracted"
 
     diagnostics = architecture["diagnostics"]
@@ -231,10 +237,10 @@ def test_architecture_edges_come_from_resolved_snapshot_evidence(auth_client):
     assert any(
         item["code"] == "RI-RES-UNRESOLVED" and item["path"] == "src/unresolved/index.ts" for item in diagnostics
     )
-    assert nodes["module:ambiguous"]["relationshipState"] == "unresolved"
-    assert nodes["module:unresolved"]["relationshipState"] == "unresolved"
-    assert not any(edge["source"] == "module:ambiguous" for edge in architecture["edges"])
-    assert not any(edge["source"] == "module:unresolved" for edge in architecture["edges"])
+    assert nodes["module:src/ambiguous/index.ts"]["relationshipState"] == "unresolved"
+    assert nodes["module:src/unresolved/index.ts"]["relationshipState"] == "unresolved"
+    assert not any(edge["source"] == "module:src/ambiguous/index.ts" for edge in architecture["edges"])
+    assert not any(edge["source"] == "module:src/unresolved/index.ts" for edge in architecture["edges"])
 
     evidence_response = auth_client.get(f"/intelligence/v1/snapshots/{snapshot_id}/evidence?limit=100")
     assert evidence_response.status_code == 200
@@ -276,7 +282,9 @@ def test_architecture_maps_every_snapshot_file_to_a_module(auth_client):
     import_edges = [
         edge
         for edge in architecture["edges"]
-        if edge["source"] == "module:unmapped.ts" and edge["target"] == "module:beta" and edge["predicate"] == "imports"
+        if edge["source"] == "module:unmapped.ts"
+        and edge["target"] == "module:src/beta/index.ts"
+        and edge["predicate"] == "imports"
     ]
     assert len(import_edges) == 1
     assert import_edges[0]["evidence"][0]["path"] == "unmapped.ts"
@@ -319,7 +327,7 @@ def test_architecture_excludes_manifest_and_lockfile_paths_from_modules(auth_cli
     node_ids = {node["id"] for node in response.json()["nodes"]}
     assert not any("package.json" in node_id for node_id in node_ids)
     assert not any("package-lock.json" in node_id for node_id in node_ids)
-    assert "module:beta" in node_ids
+    assert "module:src/beta/index.ts" in node_ids
 
 
 def test_architecture_does_not_flag_a_module_for_external_or_platform_references(auth_client):
@@ -341,10 +349,10 @@ def test_architecture_does_not_flag_a_module_for_external_or_platform_references
     diagnostics = architecture["diagnostics"]
 
     # 'fs' + readFileSync() are the language platform: not a coverage gap.
-    assert nodes["module:pure"]["relationshipState"] != "unresolved"
+    assert nodes["module:src/pure/index.ts"]["relationshipState"] != "unresolved"
     assert not any(item["code"] == "RI-RES-UNRESOLVED" and item["path"] == "src/pure/index.ts" for item in diagnostics)
     # '../nowhere' resolves to nothing in-repo: still a real gap.
-    assert nodes["module:broken"]["relationshipState"] == "unresolved"
+    assert nodes["module:src/broken/index.ts"]["relationshipState"] == "unresolved"
     assert any(item["code"] == "RI-RES-UNRESOLVED" and item["path"] == "src/broken/index.ts" for item in diagnostics)
 
 
@@ -485,3 +493,92 @@ def test_architecture_without_a_sealed_snapshot_returns_404(auth_client):
     response = auth_client.get(f"/analysis/{repository['id']}/architecture")
 
     assert response.status_code == 404
+
+
+def test_a_library_with_no_http_surface_gets_no_request_flow(auth_client):
+    """#446: `pallets/click` is an argument parser with no server, and the
+    Architecture response answered for it with a Client step reading "Browser
+    or API client sends a request". Nothing observed it; it was a template."""
+
+    sources = {
+        # No index/main file either, so nothing is classified as an entrypoint
+        # and the null case is genuinely exercised.
+        "src/parser/tokenizer.ts": b"export class Parser { parse(argv: string[]) { return argv; } }\n",
+        "src/types/flags.ts": b"export type Flag = { name: string };\n",
+        "README.md": b"# A command line library\n",
+    }
+    repository = _upload(auth_client, sources)
+    _persist_snapshot(repository["id"], sources)
+
+    architecture = auth_client.get(f"/analysis/{repository['id']}/architecture").json()
+
+    assert architecture["requestFlow"] == []
+    # No pattern was detected and no entrypoint observed, so both say so
+    # rather than offering "Repository Architecture" and "/" as findings.
+    assert architecture["architectureType"] is None
+    assert architecture["summary"]["architecturePattern"] is None
+    assert architecture["summary"]["entryPoint"] is None
+
+
+def test_a_repository_with_routes_still_gets_a_flow_built_from_observed_modules(auth_client):
+    """The rule removes fabrication, not the feature: an observed HTTP surface
+    still produces a flow, and each step names the modules really in that role
+    instead of narrating invented verbs."""
+
+    sources = {
+        "src/routes/orders.ts": b"import { place } from '../services/ordering';\nexport const handler = () => place();\n",
+        "src/services/ordering.ts": b"export const place = () => 1;\n",
+        "README.md": b"# A service\n",
+    }
+    repository = _upload(auth_client, sources)
+    _persist_snapshot(repository["id"], sources)
+
+    architecture = auth_client.get(f"/analysis/{repository['id']}/architecture").json()
+
+    flow = architecture["requestFlow"]
+    assert [step["id"] for step in flow] == ["client", "api", "service"]
+    # The client step makes no claim about who the client is.
+    assert flow[0]["details"] == []
+    assert "browser" not in flow[0]["description"].lower()
+    # Every named detail is a module that genuinely exists in the response.
+    module_names = {module["name"] for module in architecture["modules"]}
+    for step in flow[1:]:
+        assert step["details"], step
+        assert set(step["details"]) <= module_names, step
+
+    # An entry point is either a path the repository really has, or nothing --
+    # never the "/" placeholder this used to fall back to (#446).
+    entry_point = architecture["summary"]["entryPoint"]
+    assert entry_point is None or entry_point in sources
+
+
+def test_repository_furniture_does_not_become_an_architecture_module(auth_client):
+    """#444: on `pallets/click`, seven of the sixteen reported modules were a
+    dotfile, a licence, a changelog or `uv.lock` -- the repository's furniture
+    given the same weight as the library. A file the extraction observed nothing
+    about is not a module of the system."""
+
+    sources = {
+        ".gitignore": b"dist/\n*.pyc\n",
+        ".editorconfig": b"root = true\n",
+        ".github/workflows/ci.yaml": b"name: ci\non: [push]\n",
+        ".pre-commit-config.yaml": b"repos: []\n",
+        "LICENSE.txt": b"BSD 3-Clause License\n",
+        "CHANGES.md": b"# Changes\n\n## 1.0\n",
+        "uv.lock": b'version = 1\n\n[[package]]\nname = "click"\nversion = "8.1.7"\n',
+        "src/alpha/index.ts": b"export const alpha = 1;\n",
+    }
+    repository = _upload(auth_client, sources)
+    _persist_snapshot(repository["id"], sources)
+
+    architecture = auth_client.get(f"/analysis/{repository['id']}/architecture").json()
+    node_ids = {node["id"] for node in architecture["nodes"]}
+
+    for furniture in (".gitignore", ".editorconfig", ".pre-commit-config", "license", "uv.lock", "github"):
+        assert not any(furniture in node_id.lower() for node_id in node_ids), f"{furniture} became a module: {node_ids}"
+    # The one file that defines something is still there, so the rule excludes
+    # furniture rather than everything that is not deeply nested.
+    assert "module:src/alpha/index.ts" in node_ids
+    # And nothing is left describing itself by its own path.
+    assert not any("derived from repository intelligence" in node["description"] for node in architecture["nodes"])
+    assert not any("Owns unknown concerns" in node["responsibilities"] for node in architecture["nodes"])

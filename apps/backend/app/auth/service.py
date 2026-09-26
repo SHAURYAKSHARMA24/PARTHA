@@ -27,9 +27,10 @@ logger = logging.getLogger(__name__)
 INVALID_CREDENTIALS = "Invalid email or password."
 INVALID_REFRESH = "Invalid refresh token."
 # #374: registration is gated by an admin-managed allowlist, not a secret --
-# unlike the retired invite-code message, this can say exactly what's wrong,
-# the same way the waitlist's own "we'll be in touch" framing does.
-EMAIL_NOT_APPROVED = "This email hasn't been approved for access yet. Join the waitlist and we'll be in touch."
+# unlike the retired invite-code message, this can say exactly what's wrong.
+# PARTHA is self-hosted, so the person who can fix it is whoever runs the
+# install (scripts/approve_email.py), not the PARTHA project.
+EMAIL_NOT_APPROVED = "This email hasn't been approved on this PARTHA install yet. Ask whoever runs it to approve it."
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -125,9 +126,10 @@ class AuthService:
 
         Without this, a genuine self-hoster running their own copy of PARTHA
         in production mode has no way to ever register at all: nobody is
-        pre-approved on a fresh database except the hardcoded product-owner
-        row seeded by the #374 migration, which is this project's own owner,
-        not theirs. This is the self-hoster claiming their own instance, the
+        pre-approved on a fresh database (the #374 migration originally
+        seeded the project owner's own address; that was removed, #465,
+        because a public pre-approved address is claimable by anyone). This
+        is the self-hoster claiming their own instance, the
         same bootstrap pattern used by most self-hosted software (the first
         person to reach the setup wizard becomes the admin).
 

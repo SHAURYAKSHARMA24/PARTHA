@@ -54,6 +54,8 @@ export function useSettings() {
   const [baseUrl, setBaseUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [models, setModels] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -88,11 +90,56 @@ export function useSettings() {
     (nextProvider: AiProvider) => {
       setProvider(nextProvider);
       setModel(capabilityByProvider.get(nextProvider)?.defaultModel ?? '');
+      // A provider with a fixed endpoint has no base URL field, so a value
+      // left over from a previously selected provider would be invisible here
+      // and still be sent -- and the backend denies any base URL on a fixed
+      // destination, which surfaced as "AI provider destination is not
+      // permitted." with nothing on screen to correct.
+      if (!capabilityByProvider.get(nextProvider)?.requiresBaseUrl) {
+        setBaseUrl('');
+      }
+      // The list belongs to the provider it came from; keeping it would offer
+      // one provider's models under another's name.
+      setModels([]);
       setStatusMessage(null);
       setError(null);
     },
     [capabilityByProvider],
   );
+
+  // Belt and braces: never send a base URL for a provider that does not take
+  // one, whatever the field happens to hold.
+  const baseUrlForRequest = useCallback(() => {
+    if (!capabilityByProvider.get(provider)?.requiresBaseUrl) return undefined;
+    return baseUrl.trim() || undefined;
+  }, [baseUrl, capabilityByProvider, provider]);
+
+  // The list comes from the provider, for this key. A model ID typed by hand
+  // is the step provider setup fails on: a default that was right when it was
+  // written stops being offered, and the only signal is a rejected request
+  // naming nothing the user could have typed instead.
+  const fetchModels = useCallback(async () => {
+    setLoadingModels(true);
+    setError(null);
+    setStatusMessage(null);
+    try {
+      const response = await aiService.listModels({
+        provider,
+        apiKey: apiKey.trim() || undefined,
+        baseUrl: baseUrlForRequest(),
+      });
+      setModels(response.models);
+      // Land on something that works rather than leaving the previous,
+      // possibly rejected, value in place.
+      if (!response.models.includes(model.trim())) setModel(response.recommended);
+      setStatusMessage(`Found ${response.models.length} model${response.models.length === 1 ? '' : 's'}.`);
+    } catch (caught) {
+      setModels([]);
+      setError(getErrorMessage(caught));
+    } finally {
+      setLoadingModels(false);
+    }
+  }, [apiKey, baseUrlForRequest, model, provider]);
 
   const saveAiConfig = useCallback(async () => {
     setLoading(true);
@@ -104,7 +151,7 @@ export function useSettings() {
         provider,
         apiKey: apiKey.trim() || undefined,
         model: model.trim() || defaultModel,
-        baseUrl: baseUrl.trim() || undefined,
+        baseUrl: baseUrlForRequest(),
       });
       setAiConfig(config);
       setApiKey('');
@@ -114,7 +161,7 @@ export function useSettings() {
     } finally {
       setLoading(false);
     }
-  }, [apiKey, baseUrl, capabilityByProvider, model, provider]);
+  }, [apiKey, baseUrlForRequest, capabilityByProvider, model, provider]);
 
   const testAiConfig = useCallback(async () => {
     setTesting(true);
@@ -126,7 +173,7 @@ export function useSettings() {
         provider,
         apiKey: apiKey.trim() || undefined,
         model: model.trim() || defaultModel,
-        baseUrl: baseUrl.trim() || undefined,
+        baseUrl: baseUrlForRequest(),
       });
       setStatusMessage(response.message);
     } catch (caught) {
@@ -134,7 +181,7 @@ export function useSettings() {
     } finally {
       setTesting(false);
     }
-  }, [apiKey, baseUrl, capabilityByProvider, model, provider]);
+  }, [apiKey, baseUrlForRequest, capabilityByProvider, model, provider]);
 
   return {
     tabs: settingsTabs,
@@ -152,6 +199,9 @@ export function useSettings() {
     setModel,
     baseUrl,
     setBaseUrl,
+    models,
+    loadingModels,
+    fetchModels,
     saveAiConfig,
     testAiConfig,
     testing,

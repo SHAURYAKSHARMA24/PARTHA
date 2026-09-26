@@ -31,6 +31,7 @@ export type ImportGithubRequest = components['schemas']['GitHubImportRequest'];
 export type RepositoryListResponse = components['schemas']['RepositoryListResponse'];
 export type RepositoryFileResponse = components['schemas']['RepositoryFileResponse'];
 export type RepositoryLineageResponse = components['schemas']['RepositoryLineageResponse'];
+export type RepositoryReanalysisResponse = components['schemas']['RepositoryReanalysisResponse'];
 export type RepositoryLineageEntry = components['schemas']['RepositoryLineageEntry'];
 
 export type RiSchemaVersion = components['schemas']['RiEvidenceResponse']['schemaVersion'];
@@ -91,6 +92,7 @@ export type AiProviderConfig = components['schemas']['AiProviderConfig'];
 export type AiProviderPublicConfig = components['schemas']['AiProviderPublicConfig'];
 export type AiProviderTestRequest = components['schemas']['AiProviderTestRequest'];
 export type AiProviderTestResponse = components['schemas']['AiProviderTestResponse'];
+export type AiProviderModelsResponse = components['schemas']['AiProviderModelsResponse'];
 export type AiProviderCapability = components['schemas']['AiProviderCapability'];
 export type AiProviderCapabilitiesResponse = components['schemas']['AiProviderCapabilitiesResponse'];
 export interface AiConversationResponse {

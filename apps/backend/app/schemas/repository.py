@@ -33,6 +33,14 @@ class FileTreeNode(CamelModel):
 
 
 class RepositoryMeta(CamelModel):
+    """Import-time repository summary from RepositoryParser: file-tree counts plus
+    filename/path heuristics for language, framework, entry point, package manager,
+    and license. It is not a Repository Intelligence fact, carries no provenance, and
+    can disagree with the sealed ri.v1 snapshot. Intelligence surfaces must read the
+    snapshot query API instead. See docs/architecture/SYSTEM_OVERVIEW.md
+    "Repository metadata vs. Repository Intelligence".
+    """
+
     language: str
     framework: str
     total_files: int
@@ -43,6 +51,9 @@ class RepositoryMeta(CamelModel):
     has_readme: bool
     has_license: bool
     license_name: str | None
+    #: Repository-relative paths of symlinks that were recorded but never
+    #: followed, so a reader can tell "not followed" from "not present".
+    skipped_symlinks: list[str] = []
 
 
 class RepositoryRevision(CamelModel):
@@ -130,3 +141,29 @@ class RepositoryLineageResponse(CamelModel):
     canonical_source_key: str | None = None
     canonical_branch: str | None = None
     entries: list[RepositoryLineageEntry]
+
+
+RepositoryReanalysisOutcome = Literal["already-current", "revision-imported"]
+
+
+class RepositoryReanalysisResponse(CamelModel):
+    """The answer to "has this repository moved?" (#448).
+
+    ``already-current`` is a state, not a failure: the branch head still names
+    the revision that is already sealed, so nothing was cloned and nothing was
+    imported. ``repository`` is the lineage's latest revision either way --
+    the newly imported one when the branch had moved, the existing one when it
+    had not -- so a caller can render the result without a second request.
+
+    ``remote_head`` is the commit the branch points at right now. On
+    ``already-current`` it equals the sealed revision by definition; it is
+    still returned so the client can show what was checked rather than asking
+    the reader to trust that something was.
+    """
+
+    outcome: RepositoryReanalysisOutcome
+    repository: RepositoryResponse
+    remote_head: str
+    #: The revision that was current before this call, present only when a new
+    #: one was imported -- it is what a two-revision diff (#219) compares from.
+    previous_repository_id: str | None = None

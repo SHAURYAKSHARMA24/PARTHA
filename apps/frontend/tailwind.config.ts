@@ -48,6 +48,10 @@ export default {
           DEFAULT: 'hsl(var(--popover))',
           foreground: 'hsl(var(--popover-foreground))',
         },
+        'brand-orange': 'hsl(var(--brand-orange))',
+        'brand-blue': 'hsl(var(--brand-blue))',
+        'brand-plum': 'hsl(var(--brand-plum))',
+        'navy-tile': 'hsl(var(--navy-tile))',
         sidebar: {
           DEFAULT: 'hsl(var(--sidebar))',
           foreground: 'hsl(var(--sidebar-foreground))',
@@ -62,7 +66,12 @@ export default {
         sm: 'calc(var(--radius) - 4px)',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        // Product UI (design typography sheet): Proza Libre for body copy,
+        // controls and forms; Montserrat (`display`) for headings.
+        sans: ['"Proza Libre"', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
+        display: ['Montserrat', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        body: ['"Proza Libre"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        accent: ['"Cormorant Upright"', 'ui-serif', 'Georgia', 'serif'],
         mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
       },
       fontSize: {

@@ -1,4 +1,6 @@
 import posixpath
+import re
+from dataclasses import dataclass
 from collections import Counter, defaultdict
 
 from app.extraction.lockfiles import SUPPORTED_LOCKFILE_FILENAMES
@@ -12,7 +14,8 @@ from app.intelligence.query_service import (
 )
 from app.insights.relationship_diagnostics import (
     UnresolvedRelationshipContext,
-    is_external_unresolved,
+    UnresolvedDisposition,
+    classify_unresolved,
     load_unresolved_relationship_context,
 )
 from app.intelligence.models import RepositoryModule
@@ -59,6 +62,27 @@ _FRAMEWORK_BY_DEPENDENCY_NAME = {
 }
 
 
+_SYMBOL_DISAMBIGUATOR = re.compile(r"#\d+$")
+
+
+def _display_symbol(qualified: str) -> str:
+    """Strip the uniqueness suffix a stable key carries for repeated names.
+
+    Two `@overload`-style definitions of the same name in one file are distinct
+    nodes, so their keys are disambiguated (``group#5``). That suffix is an
+    identity detail, not part of what the code calls the symbol.
+    """
+
+    return _SYMBOL_DISAMBIGUATOR.sub("", qualified)
+
+
+@dataclass(frozen=True)
+class StackSummary:
+    language: str
+    framework: str
+    entry_point: str | None
+
+
 class ArchitectureAnalyzer:
     """Builds the Architecture read model exclusively from sealed ri.v1 snapshots.
 
@@ -79,7 +103,8 @@ class ArchitectureAnalyzer:
         facts = self.snapshots.architecture_facts(record.id) if self.snapshots is not None else None
         modules = self._modules_from_facts(facts)
         frameworks = self._frameworks_from_facts(facts)
-        primary_language = self._primary_language_from_facts(facts)
+        stack = self.stack_summary(facts)
+        primary_language = stack.language
         entry_points = self._entry_points_from_facts(facts)
         nodes = self._nodes_for_modules(modules)
         nodes.extend(self._dependency_nodes(facts))
@@ -116,10 +141,11 @@ class ArchitectureAnalyzer:
             request_flow=self._request_flow(modules),
             summary=ArchitectureSummary(
                 language=primary_language,
-                framework=frameworks[0] if frameworks else "Unknown",
+                framework=stack.framework,
                 total_modules=len(arch_modules),
                 total_nodes=len(nodes),
-                entry_point=entry_points[0] if entry_points else "/",
+                # An observed entrypoint or nothing: "/" is not a path click has (#446).
+                entry_point=entry_points[0] if entry_points else None,
                 architecture_pattern=self._architecture_type(frameworks),
             ),
             relationship_snapshot_id=facts.snapshot.snapshot_id if facts is not None else None,
@@ -135,8 +161,8 @@ class ArchitectureAnalyzer:
                     id=module.id,
                     name=module.name,
                     type=node_type,  # type: ignore[arg-type]
-                    description=f"{module.name} derived from repository intelligence at {module.path_prefix}.",
-                    responsibilities=[f"Owns {module.role} concerns"],
+                    description=self._module_description(module),
+                    responsibilities=self._module_responsibilities(module),
                     files=module.files[:25],
                     dependencies=[],
                     dependents=[],
@@ -150,6 +176,52 @@ class ArchitectureAnalyzer:
                 )
             )
         return nodes
+
+    @staticmethod
+    def _module_description(module: RepositoryModule) -> str:
+        """State what the snapshot observed, rather than restating the path.
+
+        Every clause here is an observed fact already sealed in the snapshot:
+        how many symbols the module defines, which of them a reader would
+        recognise it by, and where it lives. Nothing is inferred about what
+        the module is *for* -- that would be a guess, and an unsourced claim
+        is exactly what this product does not make.
+        """
+
+        if not module.symbols:
+            # No symbols observed is itself worth saying plainly, rather than
+            # dressing the path up as a description.
+            return f"{module.path_prefix} — no code symbols were extracted from this module."
+        count = len(module.symbols)
+        noun = "symbol" if count == 1 else "symbols"
+        notable = ArchitectureAnalyzer._notable_symbols(module.symbols)
+        if not notable:
+            return f"Defines {count} {noun}."
+        listed = ", ".join(notable)
+        if count == len(notable):
+            # Everything it defines is named, so "including" would understate it.
+            return f"Defines {count} {noun}: {listed}."
+        return f"Defines {count} {noun}, including {listed}."
+
+    @staticmethod
+    def _module_responsibilities(module: RepositoryModule) -> list[str]:
+        """Observed properties of the module, not a guess at its purpose.
+
+        The previous wording ("Owns unknown concerns") read as a statement
+        about the code when it was really a statement about the classifier
+        having no opinion. Where a role *was* classified it is reported as
+        one; where it was not, the entry is omitted rather than asserted.
+        """
+
+        entries: list[str] = []
+        if module.role and module.role != "unknown":
+            entries.append(f"Classified as {module.role.replace('-', ' ')}")
+        file_count = len(module.files)
+        if file_count > 1:
+            entries.append(f"{file_count} files")
+        if module.symbols:
+            entries.append(f"{len(module.symbols)} observed symbols")
+        return entries
 
     def _empty_module(self, files: list[str]) -> list[RepositoryModule]:
         return [
@@ -182,6 +254,84 @@ class ArchitectureAnalyzer:
             roles[assertion.subject_key.removeprefix("file:")] = classification
         return roles
 
+    @staticmethod
+    def _paths_in_relationships(facts: ArchitectureSnapshotFacts) -> set[str]:
+        """Files that are one end of an observed architecture relationship.
+
+        A file can be a real part of the system while defining nothing of its
+        own -- a package initialiser that only re-exports, a barrel module.
+        What makes it structural is that something resolved to it, or it
+        resolved to something, and both of those are sealed edges.
+        """
+
+        paths: set[str] = set()
+        for edge in facts.edges:
+            for key in (edge.subject_key, edge.object_key):
+                if key.startswith("file:"):
+                    paths.add(key.removeprefix("file:"))
+        return paths
+
+    @staticmethod
+    def _is_module_file(
+        path: str,
+        *,
+        role: str | None,
+        defines_symbols: bool,
+        related_paths: set[str],
+    ) -> bool:
+        """Whether this file is part of the system's own structure (#444).
+
+        A module has to be something the extraction actually saw: symbols it
+        defines, a relationship it takes part in, or a role the snapshot
+        classified it into (``documentation``, ``test``, ``controller``). A
+        file that produced none of those is not being judged unimportant --
+        nothing was observed about it, and inventing a module from a path is
+        how `.gitignore` ended up sitting in the Shared layer beside the
+        library itself.
+        """
+
+        if defines_symbols or path in related_paths:
+            return True
+        return role is not None and role != "unknown"
+
+    def _symbols_by_file(self, facts: ArchitectureSnapshotFacts) -> dict[str, list[str]]:
+        """Map file path -> names of the symbols that file defines.
+
+        Symbol stable keys are ``<path>::<qualified name>`` (#217), so the
+        owning file is read off the key rather than inferred. These are
+        observed facts already sealed in the snapshot; nothing here computes
+        or estimates anything.
+        """
+
+        symbols: dict[str, list[str]] = defaultdict(list)
+        for stable_key in facts.symbol_keys:
+            path, separator, qualified = stable_key.partition("::")
+            if not separator or not path or not qualified:
+                continue
+            # Top-level definitions only. A method is defined by its class, not
+            # by the module, and counting every one of them turns "what does
+            # this module define" into a line-count proxy -- which is exactly
+            # the kind of synthesized measure #217 rules out.
+            if "." in qualified:
+                continue
+            symbols[path].append(_display_symbol(qualified))
+        return {path: sorted(set(names)) for path, names in symbols.items()}
+
+    @staticmethod
+    def _notable_symbols(qualified_names: list[str], limit: int = 4) -> list[str]:
+        """The symbols a reader would recognise the module by.
+
+        The caller has already narrowed these to top-level definitions, so the
+        only judgement left is the oldest convention there is: a leading
+        underscore means the author did not mean it for the outside. Those are
+        dropped unless they are all there is. Ordering is deterministic, so the
+        same snapshot always renders the same description.
+        """
+
+        public = [name for name in qualified_names if not name.startswith("_")]
+        chosen = public or qualified_names
+        return sorted(chosen)[:limit]
+
     def _modules_from_facts(self, facts: ArchitectureSnapshotFacts | None) -> list[RepositoryModule]:
         if facts is None:
             # Defensive only: build_architecture requires a sealed snapshot
@@ -190,24 +340,39 @@ class ArchitectureAnalyzer:
             # unresolved. It stays as an honest, empty module set rather than
             # ever reading `record.file_tree` (unsealed repository metadata).
             return self._empty_module([])
-        # Dependency-manifest and lockfile paths already surface as
-        # dependency evidence (Dependency Graph) -- grouping them into an
-        # architecture module too misrepresents `package.json`/
-        # `pyproject.toml` as a piece of the system's own structure.
+        role_by_path = self._file_roles(facts)
+        symbols_by_path = self._symbols_by_file(facts)
+        related_paths = self._paths_in_relationships(facts)
+        # Dependency-manifest and lockfile paths already surface as dependency
+        # evidence (Dependency Graph) -- grouping them into an architecture
+        # module too misrepresents `package.json`/`pyproject.toml` as a piece
+        # of the system's own structure. #396 stopped there, which was right
+        # but narrower than the defect: `.gitignore`, `.editorconfig`,
+        # `LICENSE.txt` and `uv.lock` are neither manifests nor lockfiles, so
+        # on `pallets/click` seven of the sixteen reported modules were not
+        # code. `_is_module_file` is what closes that hole.
         _non_module_filenames = SUPPORTED_MANIFEST_FILENAMES + SUPPORTED_LOCKFILE_FILENAMES
         file_paths = sorted(
-            node.stable_key.removeprefix("file:")
-            for node in facts.nodes
-            if node.node_kind == "file"
-            and node.stable_key.startswith("file:")
-            and posixpath.basename(node.stable_key.removeprefix("file:")) not in _non_module_filenames
+            path
+            for path in (
+                node.stable_key.removeprefix("file:")
+                for node in facts.nodes
+                if node.node_kind == "file" and node.stable_key.startswith("file:")
+            )
+            if posixpath.basename(path) not in _non_module_filenames
+            and self._is_module_file(
+                path,
+                role=role_by_path.get(path),
+                defines_symbols=bool(symbols_by_path.get(path)),
+                related_paths=related_paths,
+            )
         )
         if not file_paths:
             return self._empty_module([])
-        role_by_path = self._file_roles(facts)
         grouped: dict[str, list[str]] = defaultdict(list)
         for path in file_paths:
-            grouped[self._module_id(path, role_by_path.get(path))].append(path)
+            module_id = self._module_id(path, role_by_path.get(path), defines_symbols=bool(symbols_by_path.get(path)))
+            grouped[module_id].append(path)
         modules: list[RepositoryModule] = []
         for module_id, paths in grouped.items():
             candidate_roles = [
@@ -228,14 +393,53 @@ class ArchitectureAnalyzer:
                     layer=layer_for_role(dominant),
                     path_prefix=self._path_prefix(paths),
                     files=sorted(paths),
-                    symbols=[],
+                    symbols=sorted({name for path in paths for name in symbols_by_path.get(path, [])}),
                     dependencies=[],
                 )
             )
-        return sorted(modules, key=lambda module: module.id)
+        return self._disambiguate_names(sorted(modules, key=lambda module: module.id))
 
     @staticmethod
-    def _module_id(path: str, role: str | None) -> str:
+    def _disambiguate_names(modules: list[RepositoryModule]) -> list[RepositoryModule]:
+        """Qualify names that would otherwise collide.
+
+        A repository can hold several modules called ``utils`` -- FastAPI has
+        four. Rendering them all as "utils" tells the reader nothing about
+        which is which, so a colliding name takes on as much of its parent
+        path as it needs to become unique (``openapi/utils``,
+        ``security/utils``). Names that are already unique are left alone, so
+        the common case stays short.
+        """
+
+        by_name: dict[str, list[RepositoryModule]] = defaultdict(list)
+        for module in modules:
+            by_name[module.name].append(module)
+        for name, colliding in by_name.items():
+            if len(colliding) < 2:
+                continue
+            for module in colliding:
+                qualifier = ArchitectureAnalyzer._qualifying_parent(module.id.removeprefix("module:"), name)
+                if qualifier:
+                    module.name = f"{qualifier}/{name}"
+        return modules
+
+    @staticmethod
+    def _qualifying_parent(path: str, name: str) -> str:
+        """The nearest ancestor directory that actually distinguishes ``path``.
+
+        A directory named after the module it contains adds nothing:
+        `examples/termui/termui.py` qualified by its immediate parent reads
+        "termui/termui", which is noise where "examples/termui" is an answer.
+        Walk up until the ancestor says something the name does not.
+        """
+
+        for segment in reversed(posixpath.dirname(path).split("/")):
+            if segment and segment != name:
+                return segment
+        return ""
+
+    @staticmethod
+    def _module_id(path: str, role: str | None, *, defines_symbols: bool = False) -> str:
         parts = [part for part in path.strip("/").split("/") if part]
         if role in {"controller", "route"}:
             return "module:api"
@@ -253,6 +457,13 @@ class ArchitectureAnalyzer:
             return "module:tests"
         if role == "documentation":
             return "module:documentation"
+        # A file that defines symbols is a module in its own right. Grouping
+        # by the directory below the source root instead collapses a whole
+        # package into one opaque node -- for a single-package repository that
+        # is the entire library reduced to a single box, which is what this
+        # branch used to do to every file under `src/<package>/`.
+        if defines_symbols and parts:
+            return f"module:{path.strip('/')}"
         if parts and parts[0] in {"app", "src", "backend", "frontend", "apps"} and len(parts) > 1:
             return f"module:{parts[1].lower()}"
         return f"module:{parts[0].lower() if parts else 'repository'}"
@@ -260,6 +471,15 @@ class ArchitectureAnalyzer:
     @staticmethod
     def _module_display_name(module_id: str) -> str:
         raw = module_id.removeprefix("module:")
+        if "/" in raw:
+            # A per-file module id carries the path for uniqueness; the reader
+            # wants the module's own name. `src/click/core.py` reads as `core`,
+            # and a package initialiser reads as the package it opens.
+            stem = posixpath.splitext(posixpath.basename(raw))[0]
+            if stem in {"__init__", "index", "mod"}:
+                parent = posixpath.basename(posixpath.dirname(raw))
+                return parent or stem
+            return stem
         if "." in raw:
             # `_module_id`'s fallback groups a top-level file with no
             # directory nesting by its own filename (e.g. "app.py") -- that
@@ -280,6 +500,23 @@ class ArchitectureAnalyzer:
             else:
                 break
         return "/" + "/".join(prefix) if prefix else "/"
+
+    def stack_summary(self, facts: ArchitectureSnapshotFacts | None) -> StackSummary:
+        """Language, framework(s) and entry point read from one snapshot.
+
+        The single derivation behind both the Architecture summary and the
+        repository's own metadata, so the pages cannot disagree about what the
+        repository is (#475). A monorepo lists every framework it declares
+        rather than picking one.
+        """
+
+        frameworks = self._frameworks_from_facts(facts)
+        entry_points = self._entry_points_from_facts(facts)
+        return StackSummary(
+            language=self._primary_language_from_facts(facts),
+            framework=", ".join(frameworks) if frameworks else "Unknown",
+            entry_point=entry_points[0] if entry_points else None,
+        )
 
     def _frameworks_from_facts(self, facts: ArchitectureSnapshotFacts | None) -> list[str]:
         if facts is None:
@@ -390,7 +627,17 @@ class ArchitectureAnalyzer:
                 return False
             if item.code != "RI-RES-UNRESOLVED":
                 return True
-            return not is_external_unresolved(item.path, (item.details or {}).get("observation_id"), unresolved_ctx)
+            disposition = classify_unresolved(
+                item.path, (item.details or {}).get("observation_id"), unresolved_ctx, item.message
+            )
+            # A reference into external code, or a call through a local name,
+            # is not an unmapped architecture relationship (nor is an asset import). A relationship whose
+            # in-repo target exists but was not linked *is* one, so it stays.
+            return disposition not in (
+                UnresolvedDisposition.EXTERNAL,
+                UnresolvedDisposition.LOCAL_BINDING,
+                UnresolvedDisposition.NON_CODE_ASSET,
+            )
 
         architecture_diagnostic_items = [item for item in facts.diagnostics if _is_architecture_relevant(item)]
         diagnostics = [
@@ -670,55 +917,90 @@ class ArchitectureAnalyzer:
             for layer, node_ids in sorted(layers.items(), key=lambda item: LAYER_ORDER.get(item[0], 99))
         ]
 
-    def _architecture_type(self, frameworks: list[str]) -> str:
+    def _architecture_type(self, frameworks: list[str]) -> str | None:
+        """A detected architectural pattern, or ``None`` when none was (#446).
+
+        The previous fallback was "Repository Architecture", which restates
+        that the subject is a repository and names no pattern at all. Framework
+        evidence is the only thing here that supports a claim, so the absence
+        of it is reported as an absence rather than dressed up as a finding.
+        """
+
         if any(framework in {"React", "Next.js", "Vue"} for framework in frameworks):
             return "Client Application"
         if any(framework in {"FastAPI", "Django", "Flask"} for framework in frameworks):
             return "Backend Service"
-        return "Repository Architecture"
+        return None
 
     def _request_flow(self, modules: list[RepositoryModule]) -> list[RequestFlowStep]:
-        module_roles = {module.role for module in modules}
+        """The path a request takes -- only for a repository that serves one (#446).
+
+        `pallets/click` is an argument parser with no server and no HTTP
+        surface, and this used to answer for it with a Client step reading
+        "Browser or API client sends a request" followed by a Repository
+        Layer. Neither was observed; it was a fixed template emitted whatever
+        the repository turned out to be, and for a library every word of it
+        was false.
+
+        So the flow now depends on an observed HTTP surface -- a module the
+        snapshot classified as a route or a controller. Without one there is
+        no request to trace and the answer is nothing, which the view states
+        as a limit. With one, each step names the modules that are actually in
+        that role rather than narrating invented verbs at the reader.
+        """
+
+        by_role: dict[str, list[RepositoryModule]] = defaultdict(list)
+        for module in modules:
+            by_role[module.role].append(module)
+        entry_modules = by_role["route"] + by_role["controller"]
+        if not entry_modules:
+            return []
+
         steps = [
             RequestFlowStep(
                 id="client",
                 name="Client",
                 type="frontend",
-                description="Request enters the system.",
-                details=["Browser or API client sends a request."],
+                description="A request arrives from outside the repository.",
+                details=[],
+            ),
+            RequestFlowStep(
+                id="api",
+                name="API Layer",
+                type="controller",
+                description=self._flow_description(entry_modules, "route or controller"),
+                details=self._flow_details(entry_modules),
             ),
         ]
-        if "route" in module_roles or "controller" in module_roles:
+        for role, step_id, name, node_type in (
+            ("service", "service", "Service Layer", "service"),
+            ("repository", "repository", "Repository Layer", "repository"),
+        ):
+            role_modules = by_role[role]
+            if not role_modules:
+                continue
             steps.append(
                 RequestFlowStep(
-                    id="api",
-                    name="API Layer",
-                    type="controller",
-                    description="Route/controller handles input.",
-                    details=["Validate request", "Call service"],
-                )
-            )
-        if "service" in module_roles:
-            steps.append(
-                RequestFlowStep(
-                    id="service",
-                    name="Service Layer",
-                    type="service",
-                    description="Business logic executes.",
-                    details=[
-                        "Coordinate repository intelligence consumers",
-                        "Transform data",
-                    ],
-                )
-            )
-        if "repository" in module_roles:
-            steps.append(
-                RequestFlowStep(
-                    id="repository",
-                    name="Repository Layer",
-                    type="repository",
-                    description="Persistence or source files are accessed.",
-                    details=["Read or write data"],
+                    id=step_id,
+                    name=name,
+                    type=node_type,  # type: ignore[arg-type]
+                    description=self._flow_description(role_modules, role),
+                    details=self._flow_details(role_modules),
                 )
             )
         return steps
+
+    @staticmethod
+    def _flow_description(modules: list[RepositoryModule], role: str) -> str:
+        count = len(modules)
+        noun = "module" if count == 1 else "modules"
+        return f"{count} {noun} classified as {role}."
+
+    @staticmethod
+    def _flow_details(modules: list[RepositoryModule], limit: int = 6) -> list[str]:
+        """The modules in this step, named. Nothing is claimed about what they do."""
+
+        names = sorted(module.name for module in modules)
+        if len(names) <= limit:
+            return names
+        return [*names[:limit], f"and {len(names) - limit} more"]

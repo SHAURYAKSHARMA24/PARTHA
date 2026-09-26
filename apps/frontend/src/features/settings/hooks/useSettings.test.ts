@@ -12,6 +12,7 @@ vi.mock('@/shared/services/api', () => ({
     getConfig: vi.fn(),
     saveConfig: vi.fn(),
     testConfig: vi.fn(),
+    listModels: vi.fn(),
   },
   getErrorMessage: vi.fn((error: unknown) => String(error)),
 }));
@@ -134,5 +135,126 @@ describe('useSettings tab deep-linking', () => {
     act(() => result.current.setActiveTab('Notifications'));
 
     expect(result.current.activeTab).toBe('Notifications');
+  });
+});
+
+describe('useSettings base URL handling across providers', () => {
+  const OLLAMA_SAVED: AiProviderPublicConfig = {
+    provider: 'ollama',
+    model: 'llama3.2',
+    baseUrl: 'http://localhost:11434',
+    hasApiKey: false,
+    apiKeyLast4: null,
+  };
+
+  it('does not carry a saved Ollama base URL into a fixed-endpoint provider', async () => {
+    // The reported sequence: Ollama is saved, the user switches to a hosted
+    // provider, and the backend answers "AI provider destination is not
+    // permitted." because a fixed destination rejects any base URL -- while
+    // the form shows no base URL field to clear, so the value is invisible.
+    vi.mocked(aiService.getConfig).mockResolvedValue(OLLAMA_SAVED);
+    vi.mocked(aiService.testConfig).mockResolvedValue({ ok: true, message: 'Connected.' });
+    vi.mocked(aiService.saveConfig).mockResolvedValue(EMPTY_CONFIG);
+
+    const { result } = renderHook(() => useSettings(), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.baseUrl).toBe('http://localhost:11434'));
+
+    act(() => result.current.setProvider('openai'));
+    expect(result.current.baseUrl).toBe('');
+
+    await act(async () => {
+      await result.current.testAiConfig();
+    });
+    expect(vi.mocked(aiService.testConfig).mock.lastCall?.[0].baseUrl).toBeUndefined();
+
+    await act(async () => {
+      await result.current.saveAiConfig();
+    });
+    expect(vi.mocked(aiService.saveConfig).mock.lastCall?.[0].baseUrl).toBeUndefined();
+  });
+
+  it('still sends the base URL for a provider that requires one', async () => {
+    vi.mocked(aiService.getConfig).mockResolvedValue(OLLAMA_SAVED);
+    vi.mocked(aiService.saveConfig).mockResolvedValue(OLLAMA_SAVED);
+
+    const { result } = renderHook(() => useSettings(), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.baseUrl).toBe('http://localhost:11434'));
+
+    await act(async () => {
+      await result.current.saveAiConfig();
+    });
+    expect(vi.mocked(aiService.saveConfig).mock.lastCall?.[0].baseUrl).toBe('http://localhost:11434');
+  });
+});
+
+describe('useSettings model discovery', () => {
+  it('fetches the models a key can use and selects one that is in the list', async () => {
+    // The failure this replaces: a default model ID that the provider no
+    // longer offers, rejected with nothing on screen naming a valid one.
+    vi.mocked(aiService.listModels).mockResolvedValue({
+      models: ['gemini-2.0-flash', 'gemini-2.5-pro'],
+      recommended: 'gemini-2.0-flash',
+    });
+
+    const { result } = renderHook(() => useSettings(), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.capabilities).toHaveLength(2));
+
+    await act(async () => {
+      await result.current.fetchModels();
+    });
+
+    expect(result.current.models).toEqual(['gemini-2.0-flash', 'gemini-2.5-pro']);
+    // The stale value is replaced, because leaving it is the bug.
+    expect(result.current.models).toContain(result.current.model);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('keeps a model the user already chose when the provider still offers it', async () => {
+    vi.mocked(aiService.listModels).mockResolvedValue({
+      models: ['gpt-4.1', 'gpt-4.1-mini'],
+      recommended: 'gpt-4.1-mini',
+    });
+
+    const { result } = renderHook(() => useSettings(), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.capabilities).toHaveLength(2));
+    act(() => result.current.setModel('gpt-4.1'));
+
+    await act(async () => {
+      await result.current.fetchModels();
+    });
+
+    expect(result.current.model).toBe('gpt-4.1');
+  });
+
+  it('drops the list when the provider changes, so one provider never offers another’s models', async () => {
+    vi.mocked(aiService.listModels).mockResolvedValue({
+      models: ['gpt-4.1-mini'],
+      recommended: 'gpt-4.1-mini',
+    });
+
+    const { result } = renderHook(() => useSettings(), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.capabilities).toHaveLength(2));
+    await act(async () => {
+      await result.current.fetchModels();
+    });
+    expect(result.current.models).toHaveLength(1);
+
+    act(() => result.current.setProvider('ollama'));
+
+    expect(result.current.models).toEqual([]);
+  });
+
+  it('surfaces a discovery failure without leaving a stale list on screen', async () => {
+    vi.mocked(aiService.listModels).mockRejectedValue(new Error('rejected the API key'));
+
+    const { result } = renderHook(() => useSettings(), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.capabilities).toHaveLength(2));
+
+    await act(async () => {
+      await result.current.fetchModels();
+    });
+
+    expect(result.current.models).toEqual([]);
+    expect(result.current.error).toContain('rejected the API key');
   });
 });

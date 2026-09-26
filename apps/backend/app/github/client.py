@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from app.core.config import Settings
 from app.core.exceptions import ExternalServiceError, TimeoutServiceError, ValidationServiceError
@@ -12,6 +13,12 @@ logger = logging.getLogger(__name__)
 
 GITHUB_RE = re.compile(r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?(?:\.git)?$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+
+
+_GITHUB_HOSTS = {"github.com", "www.github.com"}
+_URL_HELP = (
+    "Use a public GitHub repository URL such as https://github.com/owner/repo, optionally followed by /tree/<branch>."
+)
 
 
 class GitHubClient:
@@ -26,6 +33,35 @@ class GitHubClient:
         if not GITHUB_RE.match(normalized):
             raise ValidationServiceError("Only public GitHub repository HTTPS URLs are supported.")
         return normalized
+
+    def split_import_url(self, url: str) -> tuple[str, str | None]:
+        """Turn the URL a person copies from the browser into ``(repo URL, ref)``.
+
+        The address bar on a branch page reads
+        ``https://github.com/owner/repo/tree/master``; rejecting it made the
+        user work out that they had to delete the tail (#481). Query strings
+        and fragments are dropped, ``www.`` is accepted, and ``/tree/<ref>`` is
+        split off as the ref (a ref may itself contain slashes, so everything
+        after ``tree/`` is the ref). Any other extra path (``/issues``,
+        ``/blob/...``) is refused with what to paste instead, rather than
+        guessed at. The repository URL still goes through
+        ``validate_public_url``.
+        """
+
+        parsed = urlsplit(url.strip())
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme != "https" or host not in _GITHUB_HOSTS:
+            raise ValidationServiceError(f"Only public GitHub repository HTTPS URLs are supported. {_URL_HELP}")
+        segments = [segment for segment in parsed.path.split("/") if segment]
+        if len(segments) < 2:
+            raise ValidationServiceError(f"That URL does not name a repository. {_URL_HELP}")
+        owner, repo, *rest = segments
+        ref: str | None = None
+        if rest:
+            if rest[0] != "tree" or len(rest) < 2:
+                raise ValidationServiceError(f"That GitHub URL points at a page, not a repository. {_URL_HELP}")
+            ref = "/".join(rest[1:])
+        return self.validate_public_url(f"https://github.com/{owner}/{repo}"), ref
 
     def validate_branch(self, branch: str | None) -> str | None:
         if not branch:
@@ -110,6 +146,59 @@ class GitHubClient:
             return None
         ref = result.stdout.strip()
         return ref if ref.startswith("refs/") else None
+
+    def read_remote_head_commit(self, url: str, branch: str | None = None) -> str | None:
+        """Resolve a branch head over the network without cloning (#448).
+
+        Re-analysis asks "has this moved?", and for a repository that has not
+        moved -- the common answer -- a full clone is a download, a parse and a
+        directory of disk to learn one SHA. ``ls-remote`` answers the same
+        question in one round trip and touches no storage.
+
+        ``url`` and ``branch`` must already be through ``validate_public_url``
+        and ``validate_branch``: both are passed to git as arguments, and the
+        branch is additionally wrapped as a full ``refs/heads/`` ref so a name
+        can never be read as a flag or a wildcard.
+        """
+
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        ref = f"refs/heads/{branch}" if branch else "HEAD"
+        try:
+            result = subprocess.run(
+                ["git", "ls-remote", "--exit-code", "--", url, ref],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_seconds,
+                env=env,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutServiceError(
+                "Resolving the GitHub branch head timed out.",
+                {"timeoutSeconds": self.timeout_seconds},
+            ) from exc
+        except (subprocess.CalledProcessError, OSError) as exc:
+            return_code = exc.returncode if isinstance(exc, subprocess.CalledProcessError) else None
+            # As with clone, raw stderr is not logged: it can echo the URL and
+            # whatever the remote chose to say back.
+            logger.warning(
+                "git ls-remote failed for public repository (error_type=%s, return_code=%s).",
+                type(exc).__name__,
+                return_code,
+            )
+            raise ExternalServiceError(
+                "Failed to reach the GitHub repository. Confirm it is still public and the branch still exists.",
+            ) from exc
+
+        first_line = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+        sha = first_line.split("\t", 1)[0].strip() if first_line else ""
+        # A short or non-hex answer means the remote said something this method
+        # does not understand; reporting None keeps the caller from comparing a
+        # malformed value against a sealed revision.
+        if len(sha) != 40 or not all(character in "0123456789abcdef" for character in sha):
+            return None
+        return sha
 
     def clone_public_repository(self, url: str, destination: Path, branch: str | None = None) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)

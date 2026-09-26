@@ -16,8 +16,13 @@ from typing import Iterable
 
 
 REGISTRY_SCHEMA_VERSION = "ri-capability-registry.v1"
-README_CAPABILITIES_START = "<!-- BEGIN GENERATED CAPABILITY REGISTRY -->"
-README_CAPABILITIES_END = "<!-- END GENERATED CAPABILITY REGISTRY -->"
+CAPABILITIES_BLOCK_START = "<!-- BEGIN GENERATED CAPABILITY REGISTRY -->"
+CAPABILITIES_BLOCK_END = "<!-- END GENERATED CAPABILITY REGISTRY -->"
+
+# Backwards-compatible aliases (the marker strings never changed; only the
+# document that hosts them moved from README.md to docs/CAPABILITIES.md).
+README_CAPABILITIES_START = CAPABILITIES_BLOCK_START
+README_CAPABILITIES_END = CAPABILITIES_BLOCK_END
 
 
 class SupportStatus(StrEnum):
@@ -566,10 +571,23 @@ LOCKFILE_CAPABILITIES: tuple[Capability, ...] = (
         "Resolved PyPI versions from poetry.lock with lock-version major 1 or 2.",
         (
             "Only each [[package]] table's name and version are read. Lock-version 2 removed the per-package category "
-            "field, so the production/development split is reported as unknown rather than guessed. Pipfile.lock, "
-            "uv.lock, and pdm.lock are not read."
+            "field, so the production/development split is reported as unknown rather than guessed. Pipfile.lock and "
+            "pdm.lock are not read; uv.lock is recognised and disclosed separately."
         ),
         "src.poetry_lockfile",
+    ),
+    _capability(
+        "lockfile.uv-lock",
+        "source",
+        "lockfile:uv.lock",
+        SupportStatus.UNSUPPORTED,
+        "uv.lock, Astral uv's resolved lockfile.",
+        (
+            "The file is recognised and disclosed rather than read: no resolved version is claimed from it. It was "
+            "previously invisible, which left a uv-managed repository looking as though it pinned nothing."
+        ),
+        "src.uv_lockfile",
+        expected_diagnostic="RI-EXT-UNSUPPORTED",
     ),
 )
 
@@ -729,7 +747,7 @@ PRODUCT_CAPABILITIES: tuple[Capability, ...] = (
         "repository-lineage",
         SupportStatus.PARTIAL,
         "Durable lineage grouping repeated imports of the same repository (RFC-0002).",
-        "The `repository_lineages` table, owner-scoped grouping, and duplicate-revision detection run on every import. No read API or UI for browsing that history exists yet.",
+        "The `repository_lineages` table, owner-scoped grouping, and duplicate-revision detection run on every import; `GET /repositories/{id}/lineage` and the repository detail page expose the ordered history. Refresh and cross-revision comparison on top of a lineage are not built.",
     ),
     _product_capability(
         "service-interactions",
@@ -767,8 +785,33 @@ def _supported_filenames(capabilities: tuple[Capability, ...], prefix: str) -> t
     )
 
 
+def _disclosed_filenames(
+    capabilities: tuple[Capability, ...], prefix: str, supported: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Derive the filenames the registry names as unsupported *formats*.
+
+    A file the product cannot read is still worth recognising: silently
+    skipping it reports the same empty result as a repository that genuinely
+    pins nothing. An extractor claims these filenames only so it can disclose
+    them as ``RI-EXT-UNSUPPORTED``. Revision qualifiers (``@v1``) and anything
+    already supported are excluded — those are handled where the file is read.
+    """
+
+    return tuple(
+        sorted(
+            {
+                item.construct.removeprefix(prefix)
+                for item in capabilities
+                if item.status == SupportStatus.UNSUPPORTED and "@" not in item.construct
+            }
+            - set(supported)
+        )
+    )
+
+
 _SUPPORTED_MANIFEST_FILENAMES = _supported_filenames(MANIFEST_CAPABILITIES, "manifest:")
 _SUPPORTED_LOCKFILE_FILENAMES = _supported_filenames(LOCKFILE_CAPABILITIES, "lockfile:")
+_DISCLOSED_LOCKFILE_FILENAMES = _disclosed_filenames(LOCKFILE_CAPABILITIES, "lockfile:", _SUPPORTED_LOCKFILE_FILENAMES)
 
 # Compose accepts four canonical filenames for one format, so the registry
 # carries the format id and the filename set is spelled out beside it.
@@ -1054,13 +1097,23 @@ def supported_lockfile_filenames() -> tuple[str, ...]:
     return _SUPPORTED_LOCKFILE_FILENAMES
 
 
+def disclosed_lockfile_filenames() -> tuple[str, ...]:
+    return _DISCLOSED_LOCKFILE_FILENAMES
+
+
 def supported_iac_filenames() -> tuple[str, ...]:
     return _SUPPORTED_IAC_FILENAMES
 
 
-def render_readme_capabilities() -> str:
+def render_capabilities_block() -> str:
+    """Render the marker-wrapped capability table spliced into ``docs/CAPABILITIES.md``.
+
+    The surrounding prose in that file is hand-written; only the text between the
+    two markers is generated and drift-checked.
+    """
+
     lines = [
-        README_CAPABILITIES_START,
+        CAPABILITIES_BLOCK_START,
         "| Capability | Status | Current boundary |",
         "| --- | --- | --- |",
     ]
@@ -1069,19 +1122,41 @@ def render_readme_capabilities() -> str:
         [
             "",
             "**Implemented with disclosed limits** means the workflow exists with an explicit coverage or trust boundary. **Planned** means it is roadmap work and current responses do not manufacture an answer. **Rejected** means the capability is intentionally outside the product contract.",
-            README_CAPABILITIES_END,
+            CAPABILITIES_BLOCK_END,
         ]
     )
     return "\n".join(lines)
 
 
-def check_readme_capabilities(readme: Path) -> None:
-    content = readme.read_text(encoding="utf-8")
-    start = content.find(README_CAPABILITIES_START)
-    end = content.find(README_CAPABILITIES_END)
+def splice_capabilities_block(document: str) -> str:
+    """Return ``document`` with its generated capability block replaced by the current one."""
+
+    start = document.find(CAPABILITIES_BLOCK_START)
+    end = document.find(CAPABILITIES_BLOCK_END)
     if start < 0 or end < start:
-        raise ValueError("README is missing the generated capability registry markers")
-    actual = content[start : end + len(README_CAPABILITIES_END)]
-    expected = render_readme_capabilities()
+        raise ValueError("document is missing the generated capability registry markers")
+    return document[:start] + render_capabilities_block() + document[end + len(CAPABILITIES_BLOCK_END) :]
+
+
+def check_capabilities_doc(path: Path) -> None:
+    """Raise if ``path`` (docs/CAPABILITIES.md) does not carry the current generated block."""
+
+    content = path.read_text(encoding="utf-8")
+    start = content.find(CAPABILITIES_BLOCK_START)
+    end = content.find(CAPABILITIES_BLOCK_END)
+    if start < 0 or end < start:
+        raise ValueError(f"{path.name} is missing the generated capability registry markers")
+    actual = content[start : end + len(CAPABILITIES_BLOCK_END)]
+    expected = render_capabilities_block()
     if actual != expected:
-        raise ValueError("README capability registry block is stale; run the reviewed registry renderer")
+        raise ValueError(
+            f"{path.name} capability registry block is stale; run `python scripts/check-capabilities.py --write`"
+        )
+
+
+# Backwards-compatible aliases for callers that predate the README -> docs move.
+render_readme_capabilities = render_capabilities_block
+
+
+def check_readme_capabilities(path: Path) -> None:
+    check_capabilities_doc(path)

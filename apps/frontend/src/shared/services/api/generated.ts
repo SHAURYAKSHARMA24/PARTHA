@@ -42,6 +42,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ai/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** List Ai Models */
+        post: operations["list_ai_models_ai_models_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ai/providers": {
         parameters: {
             query?: never;
@@ -791,6 +808,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/repositories/{repository_id}/reanalyse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reanalyse Repository */
+        post: operations["reanalyse_repository_repositories__repository_id__reanalyse_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/repositories/github": {
         parameters: {
             query?: never;
@@ -944,6 +978,20 @@ export interface components {
              * @enum {string}
              */
             provider: "openai" | "anthropic" | "gemini" | "openrouter" | "ollama";
+        };
+        /**
+         * AiProviderModelsResponse
+         * @description The model IDs this provider reports for the caller's own key (#291).
+         *
+         *     Every entry came back from the provider, so the list is what the key can
+         *     actually use rather than what was true when a default was last written.
+         *     ``recommended`` is one of ``models``, never a value invented here.
+         */
+        AiProviderModelsResponse: {
+            /** Models */
+            models: string[];
+            /** Recommended */
+            recommended: string;
         };
         /** AiProviderPublicConfig */
         AiProviderPublicConfig: {
@@ -1115,7 +1163,7 @@ export interface components {
         /** ArchitectureResponse */
         ArchitectureResponse: {
             /** Architecturetype */
-            architectureType: string;
+            architectureType: string | null;
             /** Detectedlayers */
             detectedLayers: components["schemas"]["ArchLayer"][];
             /** Diagnostics */
@@ -1139,9 +1187,9 @@ export interface components {
         /** ArchitectureSummary */
         ArchitectureSummary: {
             /** Architecturepattern */
-            architecturePattern: string;
+            architecturePattern: string | null;
             /** Entrypoint */
-            entryPoint: string;
+            entryPoint: string | null;
             /** Framework */
             framework: string;
             /** Language */
@@ -2008,7 +2056,15 @@ export interface components {
             /** Total */
             total: number;
         };
-        /** RepositoryMeta */
+        /**
+         * RepositoryMeta
+         * @description Import-time repository summary from RepositoryParser: file-tree counts plus
+         *     filename/path heuristics for language, framework, entry point, package manager,
+         *     and license. It is not a Repository Intelligence fact, carries no provenance, and
+         *     can disagree with the sealed ri.v1 snapshot. Intelligence surfaces must read the
+         *     snapshot query API instead. See docs/architecture/SYSTEM_OVERVIEW.md
+         *     "Repository metadata vs. Repository Intelligence".
+         */
         RepositoryMeta: {
             /** Configfiles */
             configFiles: string[];
@@ -2026,10 +2082,42 @@ export interface components {
             licenseName: string | null;
             /** Packagemanager */
             packageManager: string | null;
+            /**
+             * Skippedsymlinks
+             * @default []
+             */
+            skippedSymlinks: string[];
             /** Totalfiles */
             totalFiles: number;
             /** Totalfolders */
             totalFolders: number;
+        };
+        /**
+         * RepositoryReanalysisResponse
+         * @description The answer to "has this repository moved?" (#448).
+         *
+         *     ``already-current`` is a state, not a failure: the branch head still names
+         *     the revision that is already sealed, so nothing was cloned and nothing was
+         *     imported. ``repository`` is the lineage's latest revision either way --
+         *     the newly imported one when the branch had moved, the existing one when it
+         *     had not -- so a caller can render the result without a second request.
+         *
+         *     ``remote_head`` is the commit the branch points at right now. On
+         *     ``already-current`` it equals the sealed revision by definition; it is
+         *     still returned so the client can show what was checked rather than asking
+         *     the reader to trust that something was.
+         */
+        RepositoryReanalysisResponse: {
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "already-current" | "revision-imported";
+            /** Previousrepositoryid */
+            previousRepositoryId?: string | null;
+            /** Remotehead */
+            remoteHead: string;
+            repository: components["schemas"]["RepositoryResponse"];
         };
         /** RepositoryResponse */
         RepositoryResponse: {
@@ -3027,6 +3115,137 @@ export interface operations {
                      * @example {
                      *       "code": "internal_server_error",
                      *       "message": "An unexpected error occurred.",
+                     *       "request_id": "req_01HXYZEXAMPLE"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_ai_models_ai_models_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiProviderTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Model IDs the provider reports for this key, with the one a first-time setup should start on. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "models": [
+                     *         "gemini-2.0-flash",
+                     *         "gemini-2.5-flash",
+                     *         "gemini-2.5-pro"
+                     *       ],
+                     *       "recommended": "gemini-2.0-flash"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["AiProviderModelsResponse"];
+                };
+            };
+            /** @description Authentication is required or the access token is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "unauthorized",
+                     *       "message": "Not authenticated.",
+                     *       "request_id": "req_01HXYZEXAMPLE"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request could not be validated. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "request_validation_error",
+                     *       "message": "Request validation failed.",
+                     *       "details": {
+                     *         "errors": [
+                     *           {
+                     *             "loc": [
+                     *               "body",
+                     *               "url"
+                     *             ],
+                     *             "msg": "Field required"
+                     *           }
+                     *         ]
+                     *       },
+                     *       "request_id": "req_01HXYZEXAMPLE"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request-rate limit has been exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "rate_limited",
+                     *       "message": "Too many requests. Try again shortly.",
+                     *       "details": {
+                     *         "retryAfterSeconds": 30
+                     *       },
+                     *       "request_id": "req_01HXYZEXAMPLE"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An unexpected server error occurred. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_server_error",
+                     *       "message": "An unexpected error occurred.",
+                     *       "request_id": "req_01HXYZEXAMPLE"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An upstream service could not complete the request. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "external_service_error",
+                     *       "message": "AI provider request failed.",
+                     *       "details": {
+                     *         "provider": "openai"
+                     *       },
                      *       "request_id": "req_01HXYZEXAMPLE"
                      *     }
                      */
@@ -8227,6 +8446,182 @@ export interface operations {
                      * @example {
                      *       "code": "internal_server_error",
                      *       "message": "An unexpected error occurred.",
+                     *       "request_id": "req_01HXYZEXAMPLE"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reanalyse_repository_repositories__repository_id__reanalyse_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                repository_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Branch head compared against the lineage's latest revision. `already-current` means the head still names the sealed revision and nothing was imported; `revision-imported` means a new revision was added to the same lineage and is being analysed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "outcome": "already-current",
+                     *       "repository": {
+                     *         "id": "11111111-1111-1111-1111-111111111111",
+                     *         "name": "example-service",
+                     *         "source": "github",
+                     *         "sourceUrl": "https://github.com/example/example-service",
+                     *         "branch": "main",
+                     *         "size": 2048,
+                     *         "fileCount": 12,
+                     *         "status": "completed",
+                     *         "analysisStage": "completed",
+                     *         "analysisProgress": 100,
+                     *         "uploadedAt": "2026-07-17T00:00:00Z",
+                     *         "analysedAt": "2026-07-17T00:00:02Z",
+                     *         "revision": {
+                     *           "kind": "git",
+                     *           "value": "0123456789abcdef0123456789abcdef01234567",
+                     *           "ref": "refs/heads/main"
+                     *         },
+                     *         "commitSha": "0123456789abcdef0123456789abcdef01234567",
+                     *         "fileTree": []
+                     *       },
+                     *       "remoteHead": "0123456789abcdef0123456789abcdef01234567"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["RepositoryReanalysisResponse"];
+                };
+            };
+            /** @description Authentication is required or the access token is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "unauthorized",
+                     *       "message": "Not authenticated.",
+                     *       "request_id": "req_01HXYZEXAMPLE"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource does not exist or is not accessible to this user. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "not_found",
+                     *       "message": "Repository not found.",
+                     *       "details": {
+                     *         "repositoryId": "11111111-1111-1111-1111-111111111111"
+                     *       },
+                     *       "request_id": "req_01HXYZEXAMPLE"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request conflicts with existing state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "conflict_error",
+                     *       "message": "Repository has already been imported.",
+                     *       "details": {
+                     *         "repositoryId": "11111111-1111-1111-1111-111111111111"
+                     *       },
+                     *       "request_id": "req_01HXYZEXAMPLE"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request-rate limit has been exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "rate_limited",
+                     *       "message": "Too many requests. Try again shortly.",
+                     *       "details": {
+                     *         "retryAfterSeconds": 30
+                     *       },
+                     *       "request_id": "req_01HXYZEXAMPLE"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An unexpected server error occurred. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_server_error",
+                     *       "message": "An unexpected error occurred.",
+                     *       "request_id": "req_01HXYZEXAMPLE"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An upstream service could not complete the request. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "external_service_error",
+                     *       "message": "AI provider request failed.",
+                     *       "details": {
+                     *         "provider": "openai"
+                     *       },
+                     *       "request_id": "req_01HXYZEXAMPLE"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An upstream service did not respond before the timeout. */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "timeout_error",
+                     *       "message": "GitHub repository clone timed out.",
+                     *       "details": {
+                     *         "timeoutSeconds": 120
+                     *       },
                      *       "request_id": "req_01HXYZEXAMPLE"
                      *     }
                      */

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "partha-backend"
-version = "0.2.0"
+version = "0.3.0"
 description = "FastAPI backend for PARTHA repository architecture intelligence."
 requires-python = ">=3.12,<3.14"
 dependencies = [
@@ -39,7 +39,7 @@ test = [
 ]
 dev = [
   "mypy==2.3.1",
-  "ruff==0.16.4",
+  "ruff==0.16.8",
 ]
 
 [tool.setuptools.packages.find]
@@ -72,9 +72,19 @@ show_error_codes = true
 warn_unused_configs = true
 warn_unused_ignores = true
 
-# Existing type debt is isolated to the listed modules. The rest of the
-# production package remains checked, so each entry can be removed as its
-# annotations are repaired without weakening the global baseline.
+# mypy runs over all of `app` and `scripts`, but the module list in the second
+# override below is checked with `ignore_errors = true`. That list is not
+# cosmetic: with it removed, `mypy app scripts` reports roughly 90 errors across
+# ~24 files (as of 2026-09), concentrated in the snapshot store, the architecture
+# analyzer, the intelligence route, and the provider HTTP layer. So a green
+# `mypy` here does NOT mean the whole backend is type-clean — it means the
+# annotated surface outside that list is, plus every module not on it.
+#
+# The list is a ratchet: an entry may be removed once that module type-checks
+# cleanly *without* being made to pass by widening real types to `Any`. Several
+# modules on the list are down to a single error and are good next candidates.
+# Do not add a module to this list to get CI green; fix the annotations.
+#
 # PyYAML ships no inline types and the stub package is not a runtime dependency.
 # Only the IaC extractor imports it, and it wraps every yaml call in its own
 # typed helpers, so the untyped boundary stops at that module.

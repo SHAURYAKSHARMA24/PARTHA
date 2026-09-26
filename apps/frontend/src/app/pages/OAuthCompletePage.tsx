@@ -13,7 +13,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   account_unavailable: 'This account is not able to sign in right now.',
   already_linked: 'That account is already linked to a different sign-in method.',
   email_not_approved:
-    "This email hasn't been approved for access yet. PARTHA is invite-only during the beta — join the waitlist and we'll be in touch.",
+    "This email hasn't been approved on this PARTHA install yet. Ask whoever runs it to approve it.",
   email_already_registered: 'An account with this email already exists. Sign in with your password instead.',
 };
 
@@ -77,7 +77,6 @@ export function OAuthCompletePage() {
 
     return (
       <AuthShell
-        eyebrow="Almost there"
         title="Confirm it's you"
         description={`An account already exists for the email your ${provider ?? 'provider'} account uses. Enter your password to link them.`}
         footer={
@@ -130,7 +129,6 @@ export function OAuthCompletePage() {
   const reason = searchParams.get('reason');
   return (
     <AuthShell
-      eyebrow="Sign-in interrupted"
       title="Couldn't complete sign-in"
       description={messageFor(reason)}
       footer={
