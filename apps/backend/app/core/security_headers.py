@@ -1,4 +1,7 @@
+import base64
 from collections.abc import Awaitable, Callable
+import hashlib
+import re
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -19,6 +22,44 @@ SECURITY_HEADERS: dict[str, str] = {
 # (the other headers still apply).
 CONTENT_SECURITY_POLICY = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 CSP_EXEMPT_PREFIXES = ("/docs", "/redoc", "/openapi.json")
+
+_INLINE_SCRIPT = re.compile(r"<script>(.*?)</script>", re.DOTALL)
+
+
+def frontend_content_security_policy(index_html: str) -> str:
+    """CSP for the SPA shell when this service also serves the built frontend (#339).
+
+    The API's deny-all policy above blocks every script and stylesheet the page
+    needs, so the shell gets its own. Inline scripts in index.html are allowed by
+    hash, computed from the built file itself so editing that script can never
+    silently break the page. Third-party origins are exactly the ones the
+    frontend loads today: Google Fonts, and the Monaco editor from jsDelivr,
+    which runs its language workers from blob: URLs. Inline styles are allowed
+    because the graph and editor libraries inject their own.
+    """
+
+    script_sources = [
+        "'self'",
+        *(
+            "'sha256-" + base64.b64encode(hashlib.sha256(body.encode("utf-8")).digest()).decode() + "'"
+            for body in _INLINE_SCRIPT.findall(index_html)
+        ),
+        "https://cdn.jsdelivr.net",
+    ]
+    directives = [
+        "default-src 'self'",
+        "script-src " + " ".join(script_sources),
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
+        "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net",
+        "img-src 'self' data: blob:",
+        "worker-src 'self' blob:",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "frame-ancestors 'none'",
+        "base-uri 'none'",
+        "form-action 'self'",
+    ]
+    return "; ".join(directives)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
