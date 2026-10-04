@@ -1,7 +1,7 @@
 import base64
 from collections.abc import Awaitable, Callable
 import hashlib
-import re
+from html.parser import HTMLParser
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -23,7 +23,38 @@ SECURITY_HEADERS: dict[str, str] = {
 CONTENT_SECURITY_POLICY = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 CSP_EXEMPT_PREFIXES = ("/docs", "/redoc", "/openapi.json")
 
-_INLINE_SCRIPT = re.compile(r"<script>(.*?)</script>", re.DOTALL)
+
+class _InlineScriptCollector(HTMLParser):
+    """Collect the exact text of every inline <script> (one without src).
+
+    A real parser rather than a regex: it matches the tag in any case and with
+    any attributes, which is what the browser does when it checks the hash.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.scripts: list[str] = []
+        self._current: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "script" and not any(name == "src" for name, _ in attrs):
+            self._current = []
+
+    def handle_data(self, data: str) -> None:
+        if self._current is not None:
+            self._current.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script" and self._current is not None:
+            self.scripts.append("".join(self._current))
+            self._current = None
+
+
+def _inline_scripts(index_html: str) -> list[str]:
+    collector = _InlineScriptCollector()
+    collector.feed(index_html)
+    collector.close()
+    return collector.scripts
 
 
 def frontend_content_security_policy(index_html: str) -> str:
@@ -42,7 +73,7 @@ def frontend_content_security_policy(index_html: str) -> str:
         "'self'",
         *(
             "'sha256-" + base64.b64encode(hashlib.sha256(body.encode("utf-8")).digest()).decode() + "'"
-            for body in _INLINE_SCRIPT.findall(index_html)
+            for body in _inline_scripts(index_html)
         ),
         "https://cdn.jsdelivr.net",
     ]
