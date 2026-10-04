@@ -37,7 +37,7 @@ class _InlineScriptCollector(HTMLParser):
         self._current: list[str] | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "script" and not any(name == "src" for name, _ in attrs):
+        if tag.lower() == "script" and not any(name.lower() == "src" for name, _ in attrs):
             self._current = []
 
     def handle_data(self, data: str) -> None:
@@ -45,7 +45,7 @@ class _InlineScriptCollector(HTMLParser):
             self._current.append(data)
 
     def handle_endtag(self, tag: str) -> None:
-        if tag == "script" and self._current is not None:
+        if tag.lower() == "script" and self._current is not None:
             self.scripts.append("".join(self._current))
             self._current = None
 
