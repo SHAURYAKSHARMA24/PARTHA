@@ -53,6 +53,7 @@ export const CATEGORY_LABELS: Record<ReviewCategoryId, string> = {
 
 export interface SampleFinding {
   id: string;
+  implementation: 'proposed';
   title: string;
   category: ReviewCategoryId;
   severity: ReviewSeverity;
@@ -63,9 +64,11 @@ export interface SampleFinding {
   endLine: number;
 }
 
+// These proposed checks are not emitted by the current Engineering Review rules.
 export const SAMPLE_FINDINGS: SampleFinding[] = [
   {
     id: 'finding-1',
+    implementation: 'proposed',
     title: 'Payment adapter imports directly from the checkout domain layer',
     category: 'architecture_boundaries',
     severity: 'medium',
@@ -79,6 +82,7 @@ export const SAMPLE_FINDINGS: SampleFinding[] = [
   },
   {
     id: 'finding-2',
+    implementation: 'proposed',
     title: 'Declared dependency pin resolves to a version not requested anywhere',
     category: 'dependency_declarations',
     severity: 'low',
@@ -91,6 +95,7 @@ export const SAMPLE_FINDINGS: SampleFinding[] = [
   },
   {
     id: 'finding-3',
+    implementation: 'proposed',
     title: 'Session cookie is issued without an explicit SameSite attribute',
     category: 'authentication_evidence',
     severity: 'high',
@@ -103,6 +108,7 @@ export const SAMPLE_FINDINGS: SampleFinding[] = [
   },
   {
     id: 'finding-4',
+    implementation: 'proposed',
     title: 'Two modules independently resolve the same order-total calculation',
     category: 'relationship_resolution',
     severity: 'info',
@@ -124,13 +130,13 @@ export interface SampleCategoryAssessment {
 }
 
 export const SAMPLE_CATEGORIES: SampleCategoryAssessment[] = [
-  { id: 'architecture_boundaries', label: CATEGORY_LABELS.architecture_boundaries, state: 'assessed', findingCount: 1, explanation: 'Module boundaries were assessed from resolved import relationships.' },
-  { id: 'relationship_resolution', label: CATEGORY_LABELS.relationship_resolution, state: 'assessed', findingCount: 1, explanation: 'Cross-module relationships were assessed from resolved facts.' },
+  { id: 'architecture_boundaries', label: CATEGORY_LABELS.architecture_boundaries, state: 'partially_assessed', findingCount: 0, explanation: 'Structural relationships are supported; domain boundary checks are proposed.' },
+  { id: 'relationship_resolution', label: CATEGORY_LABELS.relationship_resolution, state: 'assessed', findingCount: 0, explanation: 'Cross-module relationships were assessed from resolved facts.' },
   { id: 'source_extraction', label: CATEGORY_LABELS.source_extraction, state: 'assessed', findingCount: 0, explanation: 'No source-extraction diagnostics were raised for this snapshot.' },
-  { id: 'dependency_declarations', label: CATEGORY_LABELS.dependency_declarations, state: 'assessed', findingCount: 1, explanation: 'Direct declarations and lockfile pins were assessed for this snapshot.' },
+  { id: 'dependency_declarations', label: CATEGORY_LABELS.dependency_declarations, state: 'partially_assessed', findingCount: 0, explanation: 'Dependency inventory is supported; lockfile reconciliation is a proposed check.' },
   { id: 'security_vulnerability_scanning', label: CATEGORY_LABELS.security_vulnerability_scanning, state: 'not_assessed', findingCount: 0, explanation: 'Vulnerability scanning is not implemented; this category is not assessed.' },
-  { id: 'authentication_evidence', label: CATEGORY_LABELS.authentication_evidence, state: 'assessed', findingCount: 1, explanation: 'The supported Python/FastAPI authentication subgraph was assessed.' },
-  { id: 'repository_structure', label: CATEGORY_LABELS.repository_structure, state: 'assessed', findingCount: 0, explanation: 'No repository-structure diagnostics were raised for this snapshot.' },
+  { id: 'authentication_evidence', label: CATEGORY_LABELS.authentication_evidence, state: 'partially_assessed', findingCount: 0, explanation: 'Authentication inventory is partial; cookie attribute checks are proposed.' },
+  { id: 'repository_structure', label: CATEGORY_LABELS.repository_structure, state: 'partially_assessed', findingCount: 0, explanation: 'No repository-structure diagnostics were raised for this snapshot.' },
   { id: 'analysis_integrity', label: CATEGORY_LABELS.analysis_integrity, state: 'assessed', findingCount: 0, explanation: 'The analysis completed with no integrity diagnostics.' },
 ];
 

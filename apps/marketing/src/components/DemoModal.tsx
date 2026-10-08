@@ -67,14 +67,14 @@ export function DemoModal({ onClose }: { onClose: () => void }) {
       <div className="sticky top-0 z-10 flex items-start justify-between gap-5 border-b border-border bg-card p-6 sm:p-8 sm:pb-6">
         <div>
           <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-accent px-3 py-1 text-2xs font-semibold uppercase tracking-[0.14em] text-primary">
-            Scripted simulation · sample repository
+            Scripted simulation Â· sample repository
           </div>
           <h2 id="demo-modal-title" className="font-display text-2xl font-semibold text-foreground">
-            See what a PARTHA analysis produces
+            Explore the review interface and proposed checks
           </h2>
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
             A scripted walkthrough of a made-up sample repository ({SAMPLE_REPO.name}) -- not a live analysis of any
-            real code. It uses PARTHA's actual finding categories and output shape.
+            real code. The four checks below are proposed and unimplemented. Categories describe current coverage; all metrics and source spans are fictional.
           </p>
         </div>
       </div>
@@ -85,7 +85,7 @@ export function DemoModal({ onClose }: { onClose: () => void }) {
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-foreground">{SAMPLE_REPO.name}</p>
               <p className="text-2xs text-muted-foreground">
-                revision {SAMPLE_REPO.revision} · {SAMPLE_REPO.languages}
+                revision {SAMPLE_REPO.revision} Â· {SAMPLE_REPO.languages}
               </p>
             </div>
             {phase !== 'idle' && (
@@ -102,8 +102,7 @@ export function DemoModal({ onClose }: { onClose: () => void }) {
           {phase === 'idle' && (
             <div className="flex flex-col items-center gap-4 px-6 py-16 text-center">
               <p className="max-w-sm text-sm text-muted-foreground">
-                Run the simulation to watch PARTHA walk through a sample repository and produce Engineering Review
-                and Repository Insights output.
+                Run the interface simulation to explore fictional metrics and proposed review checks.
               </p>
               <button
                 type="button"
@@ -185,7 +184,7 @@ export function DemoModal({ onClose }: { onClose: () => void }) {
                           </span>
                         </div>
                         <p className="mt-1 text-2xs font-medium uppercase tracking-wide text-muted-foreground">
-                          {CATEGORY_LABELS[finding.category]}
+                          {CATEGORY_LABELS[finding.category]} · Proposed check (not implemented)
                         </p>
                         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{finding.explanation}</p>
                         <p className="mt-2 text-sm leading-relaxed text-foreground">
