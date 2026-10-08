@@ -18,7 +18,7 @@ def test_zip_count_rejected_before_zipinfo_materialization(tmp_path, monkeypatch
         raise AssertionError("ZipInfo materialized before metadata limit")
 
     monkeypatch.setattr(zipfile, "ZipFile", forbidden)
-    with pytest.raises(ValidationServiceError, match="metadata exceeds"):
+    with pytest.raises(ValidationServiceError, match="Archive contains more entries than the configured maximum"):
         storage.extract_archive(path, "bounded")
 
 
