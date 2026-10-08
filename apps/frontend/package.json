@@ -21,7 +21,6 @@
     "framer-motion": "^13.4.0",
     "html-to-image": "^1.11.13",
     "lucide-react": "^0.577.0",
-    "partha-monorepo": "file:../..",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-dropzone": "^20.1.2",
