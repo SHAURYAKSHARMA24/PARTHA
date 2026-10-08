@@ -1,4 +1,5 @@
 import shutil
+import struct
 import tarfile
 import zipfile
 from pathlib import Path
@@ -81,13 +82,14 @@ class LocalStorage:
         destination = self.reset_repository_path(repository_id)
         try:
             if zipfile.is_zipfile(archive_path):
+                self._check_zip_metadata(archive_path)
                 with zipfile.ZipFile(archive_path) as archive:
                     self._safe_extract_zip(archive, destination)
                 self._strip_macos_artifacts(destination)
                 return self._normalise_single_root(destination)
 
             if tarfile.is_tarfile(archive_path):
-                with tarfile.open(archive_path) as archive:
+                with tarfile.open(archive_path, mode="r|*") as archive:
                     self._safe_extract_tar(archive, destination)
                 self._strip_macos_artifacts(destination)
                 return self._normalise_single_root(destination)
@@ -95,6 +97,51 @@ class LocalStorage:
             raise ValidationServiceError("Archive is corrupted or cannot be extracted.") from exc
 
         raise ValidationServiceError("Unsupported archive format. Upload a ZIP or TAR archive.")
+
+    def _check_zip_metadata(self, path: Path) -> None:
+        """Bound central-directory work before ZipFile creates ZipInfo objects.
+
+        CPython's bounded footer reader supports ordinary and ZIP64 end records.
+        Count actual central headers too: ZipFile does not trust footer counts.
+        The private footer constants mirror our supported Python 3.12/3.13
+        ZipFile implementation; regression fixtures exercise this boundary.
+        """
+        with path.open("rb") as source:
+            footer = zipfile._EndRecData(source)
+            if footer is None:
+                raise zipfile.BadZipFile("Missing end record")
+            size = footer[zipfile._ECD_SIZE]
+            if size > 16 * 1024 * 1024 or footer[zipfile._ECD_ENTRIES_TOTAL] > self.max_extracted_entries:
+                raise ValidationServiceError("Archive central-directory metadata exceeds configured limits.")
+            start = footer[zipfile._ECD_LOCATION] - size
+            if footer[zipfile._ECD_SIGNATURE] == zipfile.stringEndArchive64:
+                start -= zipfile.sizeEndCentDir64 + zipfile.sizeEndCentDir64Locator
+            if size < 0 or start < 0:
+                raise zipfile.BadZipFile("Invalid central-directory bounds")
+            source.seek(start)
+            end = start + size
+            count = 0
+            while source.tell() < end:
+                raw = source.read(zipfile.sizeCentralDir)
+                if len(raw) != zipfile.sizeCentralDir:
+                    raise zipfile.BadZipFile("Truncated central-directory header")
+                header = struct.unpack(zipfile.structCentralDir, raw)
+                if header[0] != zipfile.stringCentralDir:
+                    raise zipfile.BadZipFile("Invalid central-directory header")
+                count += 1
+                if count > self.max_extracted_entries:
+                    raise ValidationServiceError("Archive contains more entries than the configured maximum.")
+                length = sum(
+                    header[index]
+                    for index in (
+                        zipfile._CD_FILENAME_LENGTH,
+                        zipfile._CD_EXTRA_FIELD_LENGTH,
+                        zipfile._CD_COMMENT_LENGTH,
+                    )
+                )
+                if source.tell() + length > end:
+                    raise zipfile.BadZipFile("Invalid central-directory member bounds")
+                source.seek(length, 1)
 
     def _safe_extract_zip(self, archive: zipfile.ZipFile, destination: Path) -> None:
         total_size = 0
@@ -120,7 +167,7 @@ class LocalStorage:
 
     def _safe_extract_tar(self, archive: tarfile.TarFile, destination: Path) -> None:
         total_size = 0
-        for entry_index, member in enumerate(archive.getmembers(), start=1):
+        for entry_index, member in enumerate(archive, start=1):
             if member.issym() or member.islnk() or member.isdev():
                 raise ValidationServiceError("Archive contains unsupported link or device entries.")
             target = destination / member.name
@@ -139,17 +186,18 @@ class LocalStorage:
                     "Archive would decompress to more than the configured maximum size.",
                     {"maxExtractedSizeBytes": self.max_extracted_size_bytes},
                 )
-        # `filter="data"` applies CPython's own extraction hardening: it strips
-        # absolute paths and `..` traversal, and rejects links, devices, setuid
-        # bits and other unsafe metadata as the members are written.
-        #
-        # The loop above already rejects those cases, so this is defence in
-        # depth on untrusted uploads rather than the primary control — the two
-        # have to disagree for it to matter, which is exactly when a check is
-        # worth having. It also settles the DeprecationWarning: tar extraction
-        # is unfiltered by default until Python 3.14, which would switch this
-        # behaviour on silently. Being explicit keeps it a decision.
-        archive.extractall(destination, filter="data")
+            # `filter="data"` applies CPython's own extraction hardening: it strips
+            # absolute paths and `..` traversal, and rejects links, devices, setuid
+            # bits and other unsafe metadata as the members are written.
+            #
+            # The loop above already rejects those cases, so this is defence in
+            # depth on untrusted uploads rather than the primary control — the two
+            # have to disagree for it to matter, which is exactly when a check is
+            # worth having. It also settles the DeprecationWarning: tar extraction
+            # is unfiltered by default until Python 3.14, which would switch this
+            # behaviour on silently. Being explicit keeps it a decision.
+            archive.extract(member, destination, filter="data")
+            archive.members.clear()
 
     def _strip_macos_artifacts(self, destination: Path) -> None:
         """Delete Finder/Archive Utility artifacts an archive may carry (#397).
