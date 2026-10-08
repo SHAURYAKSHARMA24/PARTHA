@@ -145,7 +145,7 @@ class AuthService:
         dialect = self.db.get_bind().dialect.name
         insert = sqlite_insert if dialect == "sqlite" else pg_insert
         statement = insert(InstallationBootstrap).values(id=BOOTSTRAP_ID).on_conflict_do_nothing()
-        return self.db.execute(statement).rowcount == 1
+        return self.db.execute(statement.returning(InstallationBootstrap.id)).scalar_one_or_none() is not None
 
     def _create_approved_user(self, user: User, approval: ApprovedEmail) -> tuple[User, str, str]:
         self.db.add(user)

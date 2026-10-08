@@ -1,4 +1,7 @@
 from pathlib import Path
+import os
+
+import pytest
 
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
@@ -33,9 +36,18 @@ def test_last_user_deletion_does_not_reopen_bootstrap(client):
     assert response.status_code == 422
 
 
-def test_concurrent_distinct_bootstrap_claims(tmp_path):
+@pytest.mark.parametrize("backend", ["sqlite", "postgresql"])
+def test_concurrent_distinct_bootstrap_claims(tmp_path, backend):
+    if backend == "postgresql" and not os.environ.get("PARTHA_TEST_PG_URL"):
+        pytest.skip("PostgreSQL disposable test database unavailable")
+    pg_url = None
+    if backend == "postgresql":
+        from tests.test_approved_emails_migration import _database_url
+
+        pg_url = _database_url(tmp_path)
     engine = create_engine(
-        f"sqlite:///{tmp_path / 'race.db'}", connect_args={"check_same_thread": False, "timeout": 20}
+        pg_url or f"sqlite:///{tmp_path / 'race.db'}",
+        connect_args={} if pg_url else {"check_same_thread": False, "timeout": 20},
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
@@ -57,6 +69,10 @@ def test_concurrent_distinct_bootstrap_claims(tmp_path):
         assert len(db.scalars(select(User)).all()) == 1
         assert len(db.scalars(select(InstallationBootstrap)).all()) == 1
     engine.dispose()
+    if pg_url:
+        from tests.test_approved_emails_migration import _drop_pg_database
+
+        _drop_pg_database(pg_url)
 
 
 def test_failed_registration_claim_rolls_back(tmp_path):
@@ -95,8 +111,6 @@ def test_migration_preserves_used_approval_after_account_deletion(tmp_path, monk
     command.upgrade(cfg, "head")
     with engine.connect() as connection:
         assert connection.execute(text("SELECT id FROM installation_bootstrap")).scalar() == "installation"
-    import pytest
-
     with pytest.raises(RuntimeError, match="Cannot remove a claimed"):
         command.downgrade(cfg, "0018_conversation_msg_indexes")
     engine.dispose()
