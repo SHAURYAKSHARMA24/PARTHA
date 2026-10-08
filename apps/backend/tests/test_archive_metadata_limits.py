@@ -45,3 +45,32 @@ def test_small_force_zip64_archive_still_extracts(tmp_path):
     storage = LocalStorage(Settings(storage_path=tmp_path / "storage"))
     destination = storage.extract_archive(path, "bounded")
     assert (destination / "small.txt").read_bytes() == b"valid"
+
+
+def test_tar_extended_metadata_rejected_before_buffering(tmp_path, monkeypatch):
+    from app.storage.local import _BoundedTarInfo
+
+    path = tmp_path / "header-only.tar"
+    header = tarfile.TarInfo("extended")
+    header.type = tarfile.XHDTYPE
+    header.size = 2048
+    path.write_bytes(header.tobuf())
+    monkeypatch.setattr(_BoundedTarInfo, "MAX_METADATA_BYTES", 1024)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("PAX metadata body buffered before limit")
+
+    monkeypatch.setattr(tarfile.TarInfo, "_proc_pax", forbidden)
+    storage = LocalStorage(Settings(storage_path=tmp_path / "storage"))
+    with pytest.raises(ValidationServiceError, match="extended metadata"):
+        storage.extract_archive(path, "bounded")
+
+
+def test_valid_pax_metadata_still_extracts(tmp_path):
+    path = tmp_path / "valid-pax.tar"
+    with tarfile.open(path, "w", format=tarfile.PAX_FORMAT) as archive:
+        info = tarfile.TarInfo("small.txt")
+        info.pax_headers = {"comment": "valid extended metadata"}
+        archive.addfile(info)
+    storage = LocalStorage(Settings(storage_path=tmp_path / "storage"))
+    assert (storage.extract_archive(path, "bounded") / "small.txt").is_file()

@@ -3,12 +3,28 @@ import struct
 import tarfile
 import zipfile
 from pathlib import Path
+from typing import cast
 
 from fastapi import UploadFile
 
 from app.core.config import Settings
 from app.core.exceptions import ValidationServiceError
 from app.parsers.repository_parser import is_macos_artifact
+
+
+class _BoundedTarInfo(tarfile.TarInfo):
+    """Bound PAX/GNU metadata before CPython buffers extended header bodies."""
+
+    MAX_METADATA_BYTES = 16 * 1024 * 1024
+
+    def _proc_member(self, archive: tarfile.TarFile) -> tarfile.TarInfo | None:
+        if self.type in {tarfile.XHDTYPE, tarfile.XGLTYPE, tarfile.GNUTYPE_LONGNAME, tarfile.GNUTYPE_LONGLINK}:
+            consumed = getattr(archive, "_partha_metadata_bytes", 0) + self.size
+            if self.size < 0 or consumed > self.MAX_METADATA_BYTES:
+                raise ValidationServiceError("TAR extended metadata exceeds the supported ingestion limit.")
+            setattr(archive, "_partha_metadata_bytes", consumed)
+        # CPython private parser seam, exercised on supported Python versions.
+        return cast(tarfile.TarInfo | None, getattr(tarfile.TarInfo, "_proc_member")(self, archive))
 
 
 class LocalStorage:
@@ -88,11 +104,16 @@ class LocalStorage:
                 self._strip_macos_artifacts(destination)
                 return self._normalise_single_root(destination)
 
-            if tarfile.is_tarfile(archive_path):
-                with tarfile.open(archive_path, mode="r|*") as archive:
-                    self._safe_extract_tar(archive, destination)
-                self._strip_macos_artifacts(destination)
-                return self._normalise_single_root(destination)
+            # is_tarfile() parses the first member before our metadata guard.
+            # Detect and extract in one bounded stream instead.
+            try:
+                tar_archive = tarfile.open(archive_path, mode="r|*", tarinfo=_BoundedTarInfo)
+            except tarfile.ReadError as exc:
+                raise ValidationServiceError("Unsupported archive format. Upload a ZIP or TAR archive.") from exc
+            with tar_archive:
+                self._safe_extract_tar(tar_archive, destination)
+            self._strip_macos_artifacts(destination)
+            return self._normalise_single_root(destination)
         except (zipfile.BadZipFile, tarfile.TarError, OSError) as exc:
             raise ValidationServiceError("Archive is corrupted or cannot be extracted.") from exc
 
