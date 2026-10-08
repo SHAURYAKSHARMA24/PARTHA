@@ -174,5 +174,4 @@ first.
 
 ZIP central-directory metadata is checked before ZipInfo materialization: at most 16 MiB
 and the configured entry count. TAR entries are processed incrementally under entry/decompressed-size
-limits. These bounds do not isolate parsing into an OS-limited subprocess; hostile extended TAR headers
-and parser CPU/RSS still require deployment-level resource isolation. No exhaustive DoS guarantee is claimed.
+limits. PAX/GNU extended header bodies are bounded to 16 MiB cumulatively before buffering, including format detection. These bounds do not isolate parser CPU/RSS into an OS-limited subprocess; deployment-level resource isolation is still needed. No exhaustive DoS guarantee is claimed.
