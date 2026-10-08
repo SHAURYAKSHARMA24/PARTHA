@@ -67,7 +67,7 @@ export function DemoModal({ onClose }: { onClose: () => void }) {
       <div className="sticky top-0 z-10 flex items-start justify-between gap-5 border-b border-border bg-card p-6 sm:p-8 sm:pb-6">
         <div>
           <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-accent px-3 py-1 text-2xs font-semibold uppercase tracking-[0.14em] text-primary">
-            Scripted simulation Â· sample repository
+            Scripted simulation · sample repository
           </div>
           <h2 id="demo-modal-title" className="font-display text-2xl font-semibold text-foreground">
             Explore the review interface and proposed checks
@@ -85,7 +85,7 @@ export function DemoModal({ onClose }: { onClose: () => void }) {
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-foreground">{SAMPLE_REPO.name}</p>
               <p className="text-2xs text-muted-foreground">
-                revision {SAMPLE_REPO.revision} Â· {SAMPLE_REPO.languages}
+                revision {SAMPLE_REPO.revision} · {SAMPLE_REPO.languages}
               </p>
             </div>
             {phase !== 'idle' && (

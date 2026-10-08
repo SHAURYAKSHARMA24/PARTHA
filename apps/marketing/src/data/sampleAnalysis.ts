@@ -1,14 +1,6 @@
-/**
- * Canned data for the scripted product simulation (#382).
- *
- * Every category id, severity level, and field name here matches the real
- * product's actual Engineering Review / Repository Insights response shape
- * (apps/backend/app/schemas -- cross-checked against
- * apps/frontend/src/shared/services/api/generated.ts, the generated OpenAPI
- * types) and the real category labels
- * (apps/backend/app/review/review_service.py's `_CATEGORY_LABELS`). The
- * repository, findings, and numbers themselves are entirely made up for a
- * fictional sample repo -- nothing here is captured from a real analysis.
+/** Fictional interface simulation. Category labels and coverage states mirror
+ * the current review contract; the explicitly proposed checks are unimplemented.
+ * Metrics, source spans and repository details are made up, not analyzer output.
  */
 
 export const SAMPLE_REPO = {
@@ -22,7 +14,7 @@ export const SIMULATION_STEPS = [
   'Extracting structural facts (Python, TypeScript)',
   'Resolving module and dependency relationships',
   'Sealing the ri.v1 snapshot',
-  'Running Engineering Review and Repository Insights',
+  'Showing proposed review checks and fictional Repository Insights',
 ] as const;
 
 export type ReviewSeverity = 'info' | 'low' | 'medium' | 'high' | 'critical';
@@ -100,7 +92,7 @@ export const SAMPLE_FINDINGS: SampleFinding[] = [
     category: 'authentication_evidence',
     severity: 'high',
     explanation:
-      'src/auth/session.py sets the session cookie without a SameSite attribute, so browsers fall back to a permissive default that varies by browser rather than an explicit, reviewable policy.',
+      'src/auth/session.py sets the session cookie without a SameSite attribute, so browser defaults apply rather than an explicit, reviewable policy.',
     remediationGuidance: 'Set SameSite explicitly (Lax or Strict) when issuing the session cookie.',
     path: 'src/auth/session.py',
     startLine: 47,
