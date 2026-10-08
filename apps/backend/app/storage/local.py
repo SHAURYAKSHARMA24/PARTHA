@@ -132,7 +132,9 @@ class LocalStorage:
             if footer is None:
                 raise zipfile.BadZipFile("Missing end record")
             size = footer[getattr(zipfile, "_ECD_SIZE")]
-            if size > 16 * 1024 * 1024 or footer[getattr(zipfile, "_ECD_ENTRIES_TOTAL")] > self.max_extracted_entries:
+            if footer[getattr(zipfile, "_ECD_ENTRIES_TOTAL")] > self.max_extracted_entries:
+                raise ValidationServiceError("Archive contains more entries than the configured maximum.")
+            if size > 16 * 1024 * 1024:
                 raise ValidationServiceError("Archive central-directory metadata exceeds configured limits.")
             start = footer[getattr(zipfile, "_ECD_LOCATION")] - size
             if footer[getattr(zipfile, "_ECD_SIGNATURE")] == getattr(zipfile, "stringEndArchive64"):
