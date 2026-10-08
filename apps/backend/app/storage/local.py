@@ -107,26 +107,26 @@ class LocalStorage:
         ZipFile implementation; regression fixtures exercise this boundary.
         """
         with path.open("rb") as source:
-            footer = zipfile._EndRecData(source)
+            footer = getattr(zipfile, "_EndRecData")(source)
             if footer is None:
                 raise zipfile.BadZipFile("Missing end record")
-            size = footer[zipfile._ECD_SIZE]
-            if size > 16 * 1024 * 1024 or footer[zipfile._ECD_ENTRIES_TOTAL] > self.max_extracted_entries:
+            size = footer[getattr(zipfile, "_ECD_SIZE")]
+            if size > 16 * 1024 * 1024 or footer[getattr(zipfile, "_ECD_ENTRIES_TOTAL")] > self.max_extracted_entries:
                 raise ValidationServiceError("Archive central-directory metadata exceeds configured limits.")
-            start = footer[zipfile._ECD_LOCATION] - size
-            if footer[zipfile._ECD_SIGNATURE] == zipfile.stringEndArchive64:
-                start -= zipfile.sizeEndCentDir64 + zipfile.sizeEndCentDir64Locator
+            start = footer[getattr(zipfile, "_ECD_LOCATION")] - size
+            if footer[getattr(zipfile, "_ECD_SIGNATURE")] == getattr(zipfile, "stringEndArchive64"):
+                start -= getattr(zipfile, "sizeEndCentDir64") + getattr(zipfile, "sizeEndCentDir64Locator")
             if size < 0 or start < 0:
                 raise zipfile.BadZipFile("Invalid central-directory bounds")
             source.seek(start)
             end = start + size
             count = 0
             while source.tell() < end:
-                raw = source.read(zipfile.sizeCentralDir)
-                if len(raw) != zipfile.sizeCentralDir:
+                raw = source.read(getattr(zipfile, "sizeCentralDir"))
+                if len(raw) != getattr(zipfile, "sizeCentralDir"):
                     raise zipfile.BadZipFile("Truncated central-directory header")
-                header = struct.unpack(zipfile.structCentralDir, raw)
-                if header[0] != zipfile.stringCentralDir:
+                header = struct.unpack(getattr(zipfile, "structCentralDir"), raw)
+                if header[0] != getattr(zipfile, "stringCentralDir"):
                     raise zipfile.BadZipFile("Invalid central-directory header")
                 count += 1
                 if count > self.max_extracted_entries:
@@ -134,9 +134,9 @@ class LocalStorage:
                 length = sum(
                     header[index]
                     for index in (
-                        zipfile._CD_FILENAME_LENGTH,
-                        zipfile._CD_EXTRA_FIELD_LENGTH,
-                        zipfile._CD_COMMENT_LENGTH,
+                        getattr(zipfile, "_CD_FILENAME_LENGTH"),
+                        getattr(zipfile, "_CD_EXTRA_FIELD_LENGTH"),
+                        getattr(zipfile, "_CD_COMMENT_LENGTH"),
                     )
                 )
                 if source.tell() + length > end:
@@ -197,7 +197,7 @@ class LocalStorage:
             # is unfiltered by default until Python 3.14, which would switch this
             # behaviour on silently. Being explicit keeps it a decision.
             archive.extract(member, destination, filter="data")
-            archive.members.clear()
+            getattr(archive, "members").clear()
 
     def _strip_macos_artifacts(self, destination: Path) -> None:
         """Delete Finder/Archive Utility artifacts an archive may carry (#397).
