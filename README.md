@@ -202,7 +202,7 @@ cd PARTHA
 docker compose up --build
 ```
 
-Open `http://localhost:8000`. The first account you register becomes the owner of the instance; approve anyone else with `docker compose exec partha python scripts/approve_email.py --email them@example.com`. Data and generated secrets live in the `partha-data` volume, and the port is bound to `127.0.0.1` only. See [`docker-compose.yml`](docker-compose.yml) for the details.
+Open `http://localhost:8000`. Initial setup permits the first account without prior approval; this grants no administrator role. Approve later emails with `docker compose exec partha python scripts/approve_email.py --email them@example.com`. Data and generated secrets live in the `partha-data` volume, and the port is bound to `127.0.0.1` only. See [`docker-compose.yml`](docker-compose.yml) for the details.
 
 The [development guide](docs/DEVELOPMENT.md) covers the full test / lint / build / benchmark / Docker / E2E commands and the local database and API-contract failures you are most likely to hit. Review the [AI provider egress policy](docs/security/AI_PROVIDER_EGRESS.md) before configuring any custom or local provider endpoint.
 
