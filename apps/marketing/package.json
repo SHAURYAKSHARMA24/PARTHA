@@ -14,6 +14,7 @@
   "dependencies": {
     "clsx": "^2.1.1",
     "lucide-react": "^0.577.0",
+    "partha-monorepo": "file:../..",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tailwind-merge": "^2.5.2",
@@ -35,5 +36,9 @@
     "typescript": "^5.5.4",
     "typescript-eslint": "^8.67.0",
     "vite": "^8.2.2"
+  },
+  "overrides": {
+    "postcss-selector-parser": "7.1.6",
+    "source-map-js": "1.2.2"
   }
 }

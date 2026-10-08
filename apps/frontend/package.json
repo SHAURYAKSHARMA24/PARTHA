@@ -21,6 +21,7 @@
     "framer-motion": "^13.4.0",
     "html-to-image": "^1.11.13",
     "lucide-react": "^0.577.0",
+    "partha-monorepo": "file:../..",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-dropzone": "^20.1.2",
@@ -60,6 +61,8 @@
     "js-yaml": "4.3.2",
     "undici": "7.30.0",
     "nanoid": "3.3.18",
-    "browserslist": "4.28.7"
+    "browserslist": "4.28.7",
+    "postcss-selector-parser": "7.1.6",
+    "source-map-js": "1.2.2"
   }
 }
