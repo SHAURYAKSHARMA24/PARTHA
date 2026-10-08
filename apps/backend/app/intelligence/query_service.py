@@ -391,10 +391,16 @@ class SnapshotQueryService:
         # that symbol is an endpoint of a relationship edge. Symbols dominate a
         # large snapshot, so excluding the unreferenced ones is the bound that
         # matters here — while still returning every node the consumer reads.
-        endpoint_keys = {key for edge in edges for key in (edge.subject_key, edge.object_key)}
-        node_filter = RiNode.node_kind.in_(ARCHITECTURE_NODE_KINDS)
-        if endpoint_keys:
-            node_filter = or_(node_filter, RiNode.stable_key.in_(endpoint_keys))
+        # Keep endpoint membership in SQL: a large graph must not become one
+        # bind parameter per endpoint (SQLite/PostgreSQL parameter limits).
+        endpoint_filter = (
+            RiEdge.snapshot_id == snapshot.snapshot_id,
+            RiEdge.predicate.in_(ARCHITECTURE_FACT_PREDICATES),
+        )
+        endpoint_keys = (
+            select(RiEdge.subject_key).where(*endpoint_filter).union(select(RiEdge.object_key).where(*endpoint_filter))
+        )
+        node_filter = or_(RiNode.node_kind.in_(ARCHITECTURE_NODE_KINDS), RiNode.stable_key.in_(endpoint_keys))
         nodes = list(
             self.db.scalars(
                 select(RiNode)
